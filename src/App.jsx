@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-const STORAGE_KEY = "gus_fitness_v4";
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+const USER_ID = "gus";
 
 const DRINKS = [
   { id: "water",   label: "Agua",     icon: "💧", color: "#38bdf8" },
@@ -74,14 +80,16 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get(STORAGE_KEY);
-        if (r?.value) {
-          const p = JSON.parse(r.value);
-          setEntries(p.entries || []);
-          if (p.today?.date === todayStr) {
-            setTodayRaw(p.today);
-            setWInput(p.today.weight || "");
-          }
+        const { data } = await supabase
+          .from("entries")
+          .select("*")
+          .eq("user_id", USER_ID)
+          .order("date", { ascending: true });
+        if (data?.length) {
+          const allEntries = data.map(r => ({ date: r.date, today: r.data, feedback: r.feedback }));
+          setEntries(allEntries);
+          const td = allEntries.find(e => e.date === todayStr);
+          if (td) { setTodayRaw(td.today); setWInput(td.today.weight || ""); }
         }
       } catch {}
       setReady(true);
@@ -120,10 +128,14 @@ export default function App() {
 
   const persist = async (newEntries, newToday) => {
     try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify({
-        entries: newEntries ?? entries,
-        today: { ...(newToday ?? todayRef.current), date: todayStr },
-      }));
+      const t = newToday ?? todayRef.current;
+      await supabase.from("entries").upsert({
+        user_id: USER_ID,
+        date: todayStr,
+        data: t,
+        feedback: t.feedback ?? null,
+      }, { onConflict: "user_id,date" });
+      if (newEntries) setEntries(newEntries);
     } catch {}
   };
 
@@ -162,7 +174,12 @@ export default function App() {
       const entry = { date: todayStr, today: { ...today }, feedback: text };
       const all = [...entries.filter(e => e.date !== todayStr), entry].sort((a, b) => a.date.localeCompare(b.date));
       setEntries(all);
-      await persist(all, today);
+      try {
+        await supabase.from("entries").upsert({
+          user_id: USER_ID, date: todayStr,
+          data: { ...today }, feedback: text,
+        }, { onConflict: "user_id,date" });
+      } catch {}
     } catch (e) {
       setAiText("Error: " + e.message);
     }
