@@ -77,6 +77,9 @@ export default function App() {
   const [drinkUnit, setDrinkUnit] = useState("ml");
   const [ready, setReady]         = useState(false);
   const [analyses, setAnalyses]   = useState([]);
+  const [calYear, setCalYear]     = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth]   = useState(new Date().getMonth());
+  const [selDay, setSelDay]       = useState(null);
   const [mealProt, setMealProt]   = useState("");
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
@@ -595,6 +598,7 @@ export default function App() {
         {screen==="stats"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
           {(()=>{
+            const imc = today.imc ? parseFloat(today.imc) : null;
             const wData = [...entries].filter(e=>e.today?.weight).slice(-30);
             const gData = [...entries].filter(e=>e.today?.grasa).slice(-30);
             const mData = entries.filter(e=>e.today?.masa_muscular).slice(-30);
@@ -632,8 +636,20 @@ export default function App() {
             return <>
               <div style={g.card}>
                 <MiniChart data={wData} key1="weight" color="#4ade80" label="⚖️ Peso — últimos 30 días" unit="kg"/>
-                <MiniChart data={gData} key1="grasa" color="#fb923c" label="🔥 % Grasa corporal" unit="%" decimals={1}/>
               </div>
+              <div style={g.card}>
+                <MiniChart data={gData} key1="grasa" color="#fb923c" label="🔥 % Grasa corporal — últimos 30 días" unit="%" decimals={1}/>
+                {gData.length>=2&&(()=>{
+                  const vals=gData.map(e=>parseFloat(e.today.grasa)).filter(Boolean);
+                  const first=vals[0]; const last=vals[vals.length-1];
+                  const perdida=(first-last).toFixed(1);
+                  return perdida>0?<div style={{fontSize:11,color:"#4ade80",marginTop:8}}>✅ Has bajado {perdida}% de grasa desde {gData[0]?.date?.slice(5)}</div>:null;
+                })()}
+              </div>
+              {imc&&<div style={{...g.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div><div style={g.sec}>📐 IMC hoy</div><div style={{fontSize:28,fontWeight:900,color:imc<25?"#4ade80":imc<30?"#fbbf24":"#f87171"}}>{imc}</div></div>
+                <div style={{fontSize:11,color:"rgba(232,245,232,.4)",textAlign:"right"}}>{imc<18.5?"Bajo peso":imc<25?"Normal":imc<30?"Sobrepeso":"Obesidad"}</div>
+              </div>}
 
               {(totalProt>0||totalCarb>0||totalFat>0)&&<div style={g.card}>
                 <div style={g.sec}>🥩 Macros de hoy</div>
@@ -668,16 +684,12 @@ export default function App() {
         </>}
 
         {screen==="history"&&(()=>{
-          const [calYear, setCalYear] = useState(new Date().getFullYear());
-          const [calMonth, setCalMonth] = useState(new Date().getMonth());
-          const [selDay, setSelDay] = useState(null);
-
           const entryMap = {};
           entries.forEach(e => { entryMap[e.date] = e; });
 
           const firstDay = new Date(calYear, calMonth, 1).getDay();
           const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
-          const startOffset = (firstDay + 6) % 7; // Monday-first
+          const startOffset = (firstDay + 6) % 7;
           const cells = Array(startOffset).fill(null).concat(
             Array.from({length: daysInMonth}, (_,i) => i+1)
           );
