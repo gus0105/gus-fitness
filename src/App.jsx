@@ -352,7 +352,7 @@ export default function App() {
 
   if (!ready) return <div style={{ ...g.page, display:"flex", alignItems:"center", justifyContent:"center" }}><div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Cargando...</div></div></div>;
 
-  const showNav = ["home","history","chat"].includes(screen);
+  const showNav = ["home","stats","history","chat"].includes(screen);
 
   return (
     <div style={g.page}>
@@ -601,7 +601,16 @@ export default function App() {
           {(()=>{
             const imc = today.imc ? parseFloat(today.imc) : null;
             const wData = [...entries].filter(e=>e.today?.weight).slice(-30);
-            const gData = [...entries].filter(e=>e.today?.grasa).slice(-30);
+            const gData = [...entries].filter(e=>{
+              if(e.today?.grasa) return true;
+              if(e.feedback&&e.feedback.includes("Grasa corporal:")) return true;
+              return false;
+            }).slice(-30).map(e=>{
+              if(e.today?.grasa) return e;
+              const match = e.feedback?.match(/Grasa corporal: ([\d.]+)%/);
+              if(match) return {...e, today:{...e.today, grasa: match[1]}};
+              return e;
+            });
             const mData = entries.filter(e=>e.today?.masa_muscular).slice(-30);
             const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
             const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
