@@ -74,6 +74,7 @@ export default function App() {
   const [drinkAmt, setDrinkAmt]   = useState("");
   const [drinkUnit, setDrinkUnit] = useState("ml");
   const [ready, setReady]         = useState(false);
+  const [analyses, setAnalyses]   = useState([]);  // {time, text, type}
   const chatEnd = useRef(null);
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -89,7 +90,12 @@ export default function App() {
           const allEntries = data.map(r => ({ date: r.date, today: r.data, feedback: r.feedback }));
           setEntries(allEntries);
           const td = allEntries.find(e => e.date === todayStr);
-          if (td) { setTodayRaw(td.today); setWInput(td.today.weight || ""); }
+          if (td) {
+            setTodayRaw(td.today);
+            setWInput(td.today.weight || "");
+            if (td.today?.analyses) setAnalyses(td.today.analyses);
+            else if (td.feedback) setAnalyses([{ time: "—", text: td.feedback, type: "summary" }]);
+          }
         }
       } catch {}
       setReady(true);
@@ -159,30 +165,59 @@ export default function App() {
     setDrinkAmt(""); setScreen("home");
   };
 
-  const analyzeDay = async () => {
-    setLoading(true); setScreen("result");
+  const buildContext = () => {
     const mealTxt = today.meals.length
       ? today.meals.map(m => `- ${MEALS.find(x => x.id === m.slot)?.label} (${m.time}): ${m.desc}`).join("\n")
       : "Sin comidas";
     const drinkTxt = today.drinks.length
       ? today.drinks.map(d => `- ${DRINKS.find(x => x.id === d.type)?.label}: ${d.amount}${d.unit}`).join("\n")
       : "Sin bebidas";
-    const prompt = `Analiza mi día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback concreto y un ajuste para mañana.`;
+    return { mealTxt, drinkTxt };
+  };
+
+  const saveAnalysis = async (text, type, newAnalyses) => {
+    const updatedToday = { ...todayRef.current, analyses: newAnalyses };
+    setTodayRaw(updatedToday);
+    todayRef.current = updatedToday;
+    const lastFeedback = [...newAnalyses].reverse().find(a => a.type === "summary")?.text
+      || newAnalyses[newAnalyses.length - 1]?.text || text;
+    try {
+      await supabase.from("entries").upsert({
+        user_id: USER_ID, date: todayStr,
+        data: updatedToday,
+        feedback: lastFeedback,
+      }, { onConflict: "user_id,date" });
+      const entry = { date: todayStr, today: updatedToday, feedback: lastFeedback };
+      const all = [...entries.filter(e => e.date !== todayStr), entry].sort((a, b) => a.date.localeCompare(b.date));
+      setEntries(all);
+    } catch {}
+  };
+
+  const analyzeNow = async () => {
+    setLoading(true); setScreen("result");
+    const { mealTxt, drinkTxt } = buildContext();
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
-      const entry = { date: todayStr, today: { ...today }, feedback: text };
-      const all = [...entries.filter(e => e.date !== todayStr), entry].sort((a, b) => a.date.localeCompare(b.date));
-      setEntries(all);
-      try {
-        await supabase.from("entries").upsert({
-          user_id: USER_ID, date: todayStr,
-          data: { ...today }, feedback: text,
-        }, { onConflict: "user_id,date" });
-      } catch {}
-    } catch (e) {
-      setAiText("Error: " + e.message);
-    }
+      const newAnalyses = [...analyses, { time: nowTime(), text, type: "quick" }];
+      setAnalyses(newAnalyses);
+      await saveAnalysis(text, "quick", newAnalyses);
+    } catch (e) { setAiText("Error: " + e.message); }
+    setLoading(false);
+  };
+
+  const analyzeDay = async () => {
+    setLoading(true); setScreen("result");
+    const { mealTxt, drinkTxt } = buildContext();
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado y un ajuste concreto para mañana.`;
+    try {
+      const text = await callClaude(prompt);
+      setAiText(text);
+      const newAnalyses = [...analyses, { time: nowTime(), text, type: "summary" }];
+      setAnalyses(newAnalyses);
+      await saveAnalysis(text, "summary", newAnalyses);
+    } catch (e) { setAiText("Error: " + e.message); }
     setLoading(false);
   };
 
@@ -339,14 +374,24 @@ export default function App() {
 
           <div style={g.card}><div style={g.sec}>📈 Evolución peso</div><Chart/></div>
 
-          <div style={g.cardG}>
-            <div style={{fontSize:11,color:"#4ade80",fontWeight:700,marginBottom:5}}>{todayEntry?"✅ Análisis completado":"🌙 Análisis del día"}</div>
-            <div style={{fontSize:12,color:"rgba(232,245,232,.48)",marginBottom:14,lineHeight:1.6}}>
-              {todayEntry?todayEntry.feedback?.slice(0,110)+"...":"Cuando termines, el coach analiza comidas, bebidas y entrenamiento."}
+          <div style={g.card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={g.sec}>🧠 Análisis del coach</div>
+              {analyses.length>0&&<span style={{fontSize:10,color:"rgba(74,222,128,.6)"}}>{analyses.length} análisis hoy</span>}
             </div>
-            {todayEntry
-              ?<button style={g.btnS} onClick={()=>{setAiText(todayEntry.feedback);setScreen("result");}}>Ver feedback</button>
-              :<button style={g.btnP} onClick={analyzeDay}>Analizar mi día →</button>}
+            {analyses.length>0&&(
+              <div style={{background:"rgba(74,222,128,.06)",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#d1fae5",lineHeight:1.6}}>
+                <div style={{fontSize:10,color:"rgba(74,222,128,.5)",marginBottom:4}}>
+                  {analyses[analyses.length-1].type==="summary"?"📋 Resumen final":"⚡ Análisis rápido"} · {analyses[analyses.length-1].time}
+                </div>
+                {analyses[analyses.length-1].text.slice(0,150)}...
+                <button style={{display:"block",marginTop:8,background:"none",border:"none",color:"#4ade80",fontSize:11,cursor:"pointer",padding:0}} onClick={()=>{setAiText(analyses[analyses.length-1].text);setScreen("result");}}>Ver completo →</button>
+              </div>
+            )}
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...g.btnS,flex:1,marginBottom:0,fontSize:12,padding:"12px 8px"}} onClick={analyzeNow}>⚡ Análisis ahora</button>
+              <button style={{...g.btnP,flex:1,marginBottom:0,fontSize:12,padding:"12px 8px"}} onClick={analyzeDay}>📋 Resumen del día</button>
+            </div>
           </div>
 
           <div style={{...g.card, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
