@@ -80,6 +80,7 @@ export default function App() {
   const [calYear, setCalYear]     = useState(new Date().getFullYear());
   const [calMonth, setCalMonth]   = useState(new Date().getMonth());
   const [selDay, setSelDay]       = useState(null);
+  const [expandedMonths, setExpandedMonths] = useState({});
   const [mealProt, setMealProt]   = useState("");
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
@@ -780,21 +781,54 @@ export default function App() {
               </div>
             )}
 
-            {/* List below calendar */}
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:"rgba(74,222,128,.4)",marginBottom:12}}>Todos los registros</div>
+            {/* List grouped by month */}
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:"rgba(74,222,128,.4)",marginBottom:12}}>Registros por mes</div>
             {entries.length===0
-              ?<div style={{textAlign:"center",padding:20,color:"rgba(232,245,232,.22)",fontSize:13}}>Aún no hay registros.</div>
-              :[...entries].reverse().map((e,i)=>(
-                <div key={i} style={{padding:"12px 0",borderBottom:"1px solid rgba(255,255,255,.05)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div>
-                    <div style={{fontSize:12,fontWeight:700,marginBottom:3}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric",month:"short"})}</div>
-                    <div style={{fontSize:11,color:"rgba(232,245,232,.32)",lineHeight:1.5}}>{e.today?.meals?.length||0} comidas · {e.today?.drinks?.length||0} bebidas{e.today?.training?` · ${e.today.training.slice(0,20)}`:""}</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:16,fontWeight:900,color:"#4ade80"}}>{e.today?.weight?`${e.today.weight}kg`:"—"}</div>
-                    {e.today?.grasa&&<div style={{fontSize:10,color:"rgba(251,146,60,.7)"}}>{e.today.grasa}%</div>}
-                  </div>
-                </div>))}
+              ? <div style={{textAlign:"center",padding:20,color:"rgba(232,245,232,.22)",fontSize:13}}>Aún no hay registros.</div>
+              : (()=>{
+                  const byMonth = {};
+                  [...entries].reverse().forEach(e => {
+                    const key = e.date.slice(0,7);
+                    if (!byMonth[key]) byMonth[key] = [];
+                    byMonth[key].push(e);
+                  });
+                  return Object.entries(byMonth).map(([monthKey, monthEntries]) => {
+                    const isOpen = expandedMonths[monthKey];
+                    const label = new Date(monthKey+"-15").toLocaleDateString("es-ES",{month:"long",year:"numeric"});
+                    const avgWeight = (monthEntries.filter(e=>e.today?.weight).reduce((s,e)=>s+parseFloat(e.today.weight),0)/monthEntries.filter(e=>e.today?.weight).length)||0;
+                    return (
+                      <div key={monthKey} style={{marginBottom:8}}>
+                        <div onClick={()=>setExpandedMonths(prev=>({...prev,[monthKey]:!prev[monthKey]}))}
+                          style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",cursor:"pointer"}}>
+                          <div>
+                            <div style={{fontSize:13,fontWeight:700,textTransform:"capitalize"}}>{label}</div>
+                            <div style={{fontSize:10,color:"rgba(232,245,232,.35)",marginTop:2}}>{monthEntries.length} días · {avgWeight>0?`media ${avgWeight.toFixed(1)}kg`:""}</div>
+                          </div>
+                          <span style={{color:"#4ade80",fontSize:16}}>{isOpen?"▲":"▼"}</span>
+                        </div>
+                        {isOpen && (
+                          <div style={{borderLeft:"2px solid rgba(74,222,128,.15)",marginLeft:8,paddingLeft:12,marginTop:4}}>
+                            {monthEntries.map((e,i)=>(
+                              <div key={i} style={{padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.04)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                                <div>
+                                  <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric"})}</div>
+                                  <div style={{fontSize:10,color:"rgba(232,245,232,.3)",lineHeight:1.5}}>
+                                    {e.today?.meals?.length||0} comidas{e.today?.training?` · ${e.today.training.slice(0,20)}`:""}
+                                  </div>
+                                </div>
+                                <div style={{textAlign:"right"}}>
+                                  <div style={{fontSize:15,fontWeight:800,color:"#4ade80"}}>{e.today?.weight?`${e.today.weight}kg`:"—"}</div>
+                                  {e.today?.grasa&&<div style={{fontSize:10,color:"rgba(251,146,60,.7)"}}>{e.today.grasa}%</div>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()
+            }
           </>;
         })()}
       </div>
