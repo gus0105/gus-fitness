@@ -45,7 +45,7 @@ function nowTime() {
   return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
-const EMPTY = { meals: [], drinks: [], weight: "", training: "" };
+const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "" };
 
 async function callClaude(userPrompt) {
   const response = await fetch("/api/coach", {
@@ -63,6 +63,8 @@ export default function App() {
   const [entries, setEntries]     = useState([]);
   const [today, setTodayRaw]      = useState(EMPTY);
   const [wInput, setWInput]       = useState("");
+  const [gInput, setGInput]       = useState("");
+  const [imcInput, setImcInput]   = useState("");
   const [aiText, setAiText]       = useState("");
   const [loading, setLoading]     = useState(false);
   const [msgs, setMsgs]           = useState([]);
@@ -74,7 +76,10 @@ export default function App() {
   const [drinkAmt, setDrinkAmt]   = useState("");
   const [drinkUnit, setDrinkUnit] = useState("ml");
   const [ready, setReady]         = useState(false);
-  const [analyses, setAnalyses]   = useState([]);  // {time, text, type}
+  const [analyses, setAnalyses]   = useState([]);
+  const [mealProt, setMealProt]   = useState("");
+  const [mealCarb, setMealCarb]   = useState("");
+  const [mealFat, setMealFat]     = useState("");
   const chatEnd = useRef(null);
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -151,12 +156,16 @@ export default function App() {
     persist(null, updated);
   };
 
-  const saveWeight = () => { if (wInput) setT({ weight: wInput }); };
+  const saveWeight = () => { if (wInput) setT({ weight: wInput, grasa: gInput, imc: imcInput }); };
 
   const addMeal = () => {
     if (!mealDesc.trim()) return;
-    setT({ meals: [...today.meals, { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime() }] });
-    setMealDesc(""); setScreen("home");
+    const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime() };
+    if (mealProt) meal.prot = parseFloat(mealProt);
+    if (mealCarb) meal.carb = parseFloat(mealCarb);
+    if (mealFat)  meal.fat  = parseFloat(mealFat);
+    setT({ meals: [...today.meals, meal] });
+    setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setScreen("home");
   };
 
   const addDrink = () => {
@@ -167,7 +176,7 @@ export default function App() {
 
   const buildContext = () => {
     const mealTxt = today.meals.length
-      ? today.meals.map(m => `- ${MEALS.find(x => x.id === m.slot)?.label} (${m.time}): ${m.desc}`).join("\n")
+      ? today.meals.map(m => { const macros = [m.prot?`P:${m.prot}g`:"",m.carb?`C:${m.carb}g`:"",m.fat?`G:${m.fat}g`:""].filter(Boolean).join(" "); return `- ${MEALS.find(x=>x.id===m.slot)?.label} (${m.time}): ${m.desc}${macros?" ["+macros+"]":""}`; }).join("\n")
       : "Sin comidas";
     const drinkTxt = today.drinks.length
       ? today.drinks.map(d => `- ${DRINKS.find(x => x.id === d.type)?.label}: ${d.amount}${d.unit}`).join("\n")
@@ -196,7 +205,7 @@ export default function App() {
   const analyzeNow = async () => {
     setLoading(true); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora.`;
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -210,7 +219,7 @@ export default function App() {
   const analyzeDay = async () => {
     setLoading(true); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado y un ajuste concreto para mañana.`;
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado y un ajuste concreto para mañana.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -319,18 +328,42 @@ export default function App() {
 
           {!today.weight ? (
             <div style={g.cardG}>
-              <div style={g.sec}>⚖️ Peso de hoy</div>
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:wInput?10:0}}>
-                <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="ej: 73.1"
-                  value={wInput} onChange={e=>setWInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveWeight()}/>
-                <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>kg</span>
+              <div style={g.sec}>⚖️ Medición de hoy</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>Peso</div>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="73.1"
+                      value={wInput} onChange={e=>setWInput(e.target.value)}/>
+                    <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kg</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>% Grasa</div>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="20.6"
+                      value={gInput} onChange={e=>setGInput(e.target.value)}/>
+                    <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>%</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>IMC</div>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="25.4"
+                      value={imcInput} onChange={e=>setImcInput(e.target.value)}/>
+                  </div>
+                </div>
               </div>
-              {wInput!==""&&<button style={{...g.btnP,marginBottom:0,marginTop:10}} onClick={saveWeight}>Guardar ✓</button>}
+              {wInput!==""&&<button style={{...g.btnP,marginBottom:0}} onClick={saveWeight}>Guardar medición ✓</button>}
             </div>
           ):(
             <div style={{...g.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><div style={g.sec}>⚖️ Peso</div><div style={{fontSize:26,fontWeight:900,color:"#4ade80"}}>{today.weight}<span style={{fontSize:13,fontWeight:600}}>kg</span></div></div>
-              <button style={g.back} onClick={()=>{setT({weight:""});setWInput("");}}>✏️</button>
+              <div style={{display:"flex",gap:20,alignItems:"center"}}>
+                <div><div style={g.sec}>⚖️ Peso</div><div style={{fontSize:24,fontWeight:900,color:"#4ade80"}}>{today.weight}<span style={{fontSize:12,fontWeight:600}}>kg</span></div></div>
+                {today.grasa&&<div><div style={g.sec}>Grasa</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{today.grasa}<span style={{fontSize:11}}>%</span></div></div>}
+                {today.imc&&<div><div style={g.sec}>IMC</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{today.imc}</div></div>}
+              </div>
+              <button style={g.back} onClick={()=>{setT({weight:"",grasa:"",imc:""});setWInput("");setGInput("");setImcInput("");}}>✏️</button>
             </div>
           )}
 
@@ -345,6 +378,7 @@ export default function App() {
                 <div style={{flex:1}}>
                   <div style={{fontSize:10,color:"#4ade80",fontWeight:700,marginBottom:2}}>{sl?.icon} {sl?.label} · {m.time}</div>
                   <div style={{fontSize:12,color:"rgba(232,245,232,.65)",lineHeight:1.4}}>{m.desc}</div>
+                  {(m.prot||m.carb||m.fat)&&<div style={{fontSize:10,color:"rgba(74,222,128,.5)",marginTop:3}}>{m.prot?`P:${m.prot}g `:""}{m.carb?`C:${m.carb}g `:""}{m.fat?`G:${m.fat}g`:""}</div>}
                 </div>
                 <button style={g.rm} onClick={()=>setT({meals:today.meals.filter(x=>x.id!==m.id)})}>×</button>
               </div>);})}
@@ -417,6 +451,33 @@ export default function App() {
             </div>
             <label style={g.lbl}>¿Qué comiste?</label>
             <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz..." value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
+            <label style={g.lbl}>Macros estimados (opcional)</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+              <div>
+                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Proteína</div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
+                    value={mealProt} onChange={e=>setMealProt(e.target.value)}/>
+                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Carbos</div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
+                    value={mealCarb} onChange={e=>setMealCarb(e.target.value)}/>
+                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Grasas</div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
+                    value={mealFat} onChange={e=>setMealFat(e.target.value)}/>
+                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
+                </div>
+              </div>
+            </div>
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
         </>}
@@ -470,24 +531,205 @@ export default function App() {
           </div>
         )}
 
-        {screen==="history"&&<>
-          <div style={{fontSize:17,fontWeight:800,marginBottom:18}}>Historial</div>
-          {entries.length===0
-            ?<div style={{textAlign:"center",padding:40,color:"rgba(232,245,232,.22)",fontSize:13}}>Aún no hay registros.</div>
-            :[...entries].reverse().map((e,i)=>(
-              <div key={i} style={{padding:"14px 0",borderBottom:"1px solid rgba(255,255,255,.05)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,marginBottom:3}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric",month:"short"})}</div>
-                  <div style={{fontSize:11,color:"rgba(232,245,232,.32)",lineHeight:1.5}}>{e.today?.meals?.length||0} comidas · {e.today?.drinks?.length||0} bebidas{e.today?.training?` · ${e.today.training.slice(0,25)}`:""}</div>
+
+        {screen==="stats"&&<>
+          <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
+          {(()=>{
+            const wData = [...entries].filter(e=>e.today?.weight).slice(-30);
+            const gData = [...entries].filter(e=>e.today?.grasa).slice(-30);
+            const mData = entries.filter(e=>e.today?.masa_muscular).slice(-30);
+            const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
+            const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
+            const totalFat  = today.meals.reduce((s,m)=>s+(m.fat||0),0);
+
+            const MiniChart = ({data,key1,color,label,unit,decimals=1})=>{
+              if(data.length<2) return <p style={{color:"rgba(232,245,232,.22)",fontSize:11,textAlign:"center",padding:"10px 0"}}>Pocos datos</p>;
+              const vals = data.map(e=>parseFloat(e.today[key1])).filter(Boolean);
+              const mn = Math.min(...vals)-0.5; const mx = Math.max(...vals)+0.5;
+              const first = vals[0]; const last = vals[vals.length-1];
+              const diff = (last-first).toFixed(decimals);
+              const diffColor = (key1==="weight"||key1==="grasa") ? (diff<0?"#4ade80":"#f87171") : (diff>0?"#4ade80":"#f87171");
+              return <div style={{marginBottom:20}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={g.sec}>{label}</div>
+                  <div style={{fontSize:11,color:diffColor,fontWeight:700}}>{diff>0?"+":""}{diff}{unit}</div>
                 </div>
-                <div style={{fontSize:18,fontWeight:900,color:"#4ade80"}}>{e.today?.weight?`${e.today.weight}kg`:"—"}</div>
-              </div>))}
+                <div style={{height:60,display:"flex",alignItems:"flex-end",gap:2}}>
+                  {data.map((e,i)=>{
+                    const v=parseFloat(e.today[key1]); if(!v) return <div key={i} style={{flex:1}}/>;
+                    const h=100-((v-mn)/(mx-mn))*80;
+                    const isLast=i===data.length-1;
+                    return <div key={i} style={{flex:1,borderRadius:"2px 2px 0 0",minWidth:0,height:`${Math.max(6,h)}%`,background:isLast?color:`${color}55`}}/>;
+                  })}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                  <span style={{fontSize:9,color:"rgba(232,245,232,.2)"}}>{data[0]?.date?.slice(5)}</span>
+                  <span style={{fontSize:11,fontWeight:700,color:color}}>{last.toFixed(decimals)}{unit}</span>
+                </div>
+              </div>;
+            };
+
+            return <>
+              <div style={g.card}>
+                <MiniChart data={wData} key1="weight" color="#4ade80" label="⚖️ Peso — últimos 30 días" unit="kg"/>
+                <MiniChart data={gData} key1="grasa" color="#fb923c" label="🔥 % Grasa corporal" unit="%" decimals={1}/>
+              </div>
+
+              {(totalProt>0||totalCarb>0||totalFat>0)&&<div style={g.card}>
+                <div style={g.sec}>🥩 Macros de hoy</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  {[["Proteína",totalProt,"#4ade80"],["Carbos",totalCarb,"#38bdf8"],["Grasas",totalFat,"#fb923c"]].map(([lbl,val,col])=>(
+                    <div key={lbl} style={{background:"rgba(255,255,255,.03)",borderRadius:12,padding:"12px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:20,fontWeight:900,color:col}}>{Math.round(val)}</div>
+                      <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginTop:3,letterSpacing:".1em",textTransform:"uppercase"}}>{lbl} g</div>
+                    </div>
+                  ))}
+                </div>
+              </div>}
+
+              <div style={g.card}>
+                <div style={g.sec}>📅 Resumen últimos 7 días</div>
+                {[...entries].slice(-7).reverse().map((e,i)=>{
+                  const prot = (e.today?.meals||[]).reduce((s,m)=>s+(m.prot||0),0);
+                  return <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:600}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric"})}</div>
+                      {prot>0&&<div style={{fontSize:10,color:"rgba(74,222,128,.5)"}}>P: {Math.round(prot)}g</div>}
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:16,fontWeight:800,color:"#4ade80"}}>{e.today?.weight?`${e.today.weight}kg`:"—"}</div>
+                      {e.today?.grasa&&<div style={{fontSize:10,color:"rgba(251,146,60,.7)"}}>{e.today.grasa}% grasa</div>}
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </>;
+          })()}
         </>}
+
+        {screen==="history"&&(()=>{
+          const [calYear, setCalYear] = useState(new Date().getFullYear());
+          const [calMonth, setCalMonth] = useState(new Date().getMonth());
+          const [selDay, setSelDay] = useState(null);
+
+          const entryMap = {};
+          entries.forEach(e => { entryMap[e.date] = e; });
+
+          const firstDay = new Date(calYear, calMonth, 1).getDay();
+          const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+          const startOffset = (firstDay + 6) % 7; // Monday-first
+          const cells = Array(startOffset).fill(null).concat(
+            Array.from({length: daysInMonth}, (_,i) => i+1)
+          );
+
+          const monthStr = new Date(calYear, calMonth).toLocaleDateString("es-ES",{month:"long",year:"numeric"});
+          const pad = n => String(n).padStart(2,"0");
+          const selEntry = selDay ? entryMap[`${calYear}-${pad(calMonth+1)}-${pad(selDay)}`] : null;
+
+          return <>
+            <div style={{fontSize:17,fontWeight:800,marginBottom:4}}>Historial</div>
+
+            {/* Legend */}
+            <div style={{display:"flex",gap:14,marginBottom:18,flexWrap:"wrap"}}>
+              {[["#4ade80","Peso"],["#818cf8","Entrenamiento"],["#fb923c","Comidas"]].map(([col,lbl])=>(
+                <div key={lbl} style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:col}}/>
+                  <span style={{fontSize:10,color:"rgba(232,245,232,.5)"}}>{lbl}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Month navigation */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <button onClick={()=>{ if(calMonth===0){setCalMonth(11);setCalYear(y=>y-1);}else setCalMonth(m=>m-1); setSelDay(null); }}
+                style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#e8f5e8",padding:"6px 12px",cursor:"pointer",fontSize:13}}>←</button>
+              <span style={{fontSize:13,fontWeight:700,textTransform:"capitalize"}}>{monthStr}</span>
+              <button onClick={()=>{ if(calMonth===11){setCalMonth(0);setCalYear(y=>y+1);}else setCalMonth(m=>m+1); setSelDay(null); }}
+                style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#e8f5e8",padding:"6px 12px",cursor:"pointer",fontSize:13}}>→</button>
+            </div>
+
+            {/* Day labels */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:4}}>
+              {["L","M","X","J","V","S","D"].map(d=>(
+                <div key={d} style={{textAlign:"center",fontSize:9,color:"rgba(232,245,232,.3)",fontWeight:700,letterSpacing:".05em"}}>{d}</div>
+              ))}
+            </div>
+
+            {/* Calendar grid */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:20}}>
+              {cells.map((day,i)=>{
+                if(!day) return <div key={i}/>;
+                const dateStr = `${calYear}-${pad(calMonth+1)}-${pad(day)}`;
+                const entry = entryMap[dateStr];
+                const hasWeight = !!(entry?.today?.weight);
+                const hasTraining = !!(entry?.today?.training);
+                const hasMeals = !!(entry?.today?.meals?.length);
+                const isToday = dateStr === todayStr;
+                const isSel = selDay === day;
+                return (
+                  <div key={i} onClick={()=>setSelDay(isSel?null:day)}
+                    style={{
+                      borderRadius:10, padding:"7px 4px", textAlign:"center", cursor:"pointer",
+                      background: isSel ? "rgba(74,222,128,.15)" : isToday ? "rgba(74,222,128,.08)" : "rgba(255,255,255,.025)",
+                      border: isSel ? "1px solid rgba(74,222,128,.5)" : isToday ? "1px solid rgba(74,222,128,.2)" : "1px solid rgba(255,255,255,.05)",
+                    }}>
+                    <div style={{fontSize:11,fontWeight:isToday?800:500,color:isToday?"#4ade80":"rgba(232,245,232,.7)",marginBottom:4}}>{day}</div>
+                    <div style={{display:"flex",justifyContent:"center",gap:2}}>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:hasWeight?"#4ade80":"rgba(255,255,255,.1)"}}/>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:hasTraining?"#818cf8":"rgba(255,255,255,.1)"}}/>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:hasMeals?"#fb923c":"rgba(255,255,255,.1)"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Selected day detail */}
+            {selDay && (
+              <div style={g.cardG}>
+                <div style={{fontSize:12,fontWeight:700,color:"#4ade80",marginBottom:10}}>
+                  {new Date(`${calYear}-${pad(calMonth+1)}-${pad(selDay)}T12:00:00`).toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"})}
+                </div>
+                {selEntry ? <>
+                  <div style={{display:"flex",gap:16,marginBottom:10}}>
+                    {selEntry.today?.weight&&<div><div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>Peso</div><div style={{fontSize:18,fontWeight:800,color:"#4ade80"}}>{selEntry.today.weight}kg</div></div>}
+                    {selEntry.today?.grasa&&<div><div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>Grasa</div><div style={{fontSize:18,fontWeight:800,color:"#fb923c"}}>{selEntry.today.grasa}%</div></div>}
+                    {selEntry.today?.imc&&<div><div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>IMC</div><div style={{fontSize:18,fontWeight:800,color:"rgba(232,245,232,.7)"}}>{selEntry.today.imc}</div></div>}
+                  </div>
+                  {selEntry.today?.training&&<div style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:8}}>💪 {selEntry.today.training}</div>}
+                  {selEntry.today?.meals?.length>0&&<div>
+                    {selEntry.today.meals.map((m,i)=>{
+                      const sl=MEALS.find(x=>x.id===m.slot);
+                      return <div key={i} style={{fontSize:11,color:"rgba(232,245,232,.6)",marginBottom:3}}>{sl?.icon} {m.desc?.slice(0,60)}{m.desc?.length>60?"...":""}</div>;
+                    })}
+                  </div>}
+                  {selEntry.feedback&&<div style={{fontSize:11,color:"rgba(232,245,232,.4)",marginTop:8,lineHeight:1.5,borderTop:"1px solid rgba(255,255,255,.07)",paddingTop:8}}>{selEntry.feedback.slice(0,120)}...</div>}
+                </> : <div style={{fontSize:12,color:"rgba(232,245,232,.3)"}}>Sin registro para este día</div>}
+              </div>
+            )}
+
+            {/* List below calendar */}
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:"rgba(74,222,128,.4)",marginBottom:12}}>Todos los registros</div>
+            {entries.length===0
+              ?<div style={{textAlign:"center",padding:20,color:"rgba(232,245,232,.22)",fontSize:13}}>Aún no hay registros.</div>
+              :[...entries].reverse().map((e,i)=>(
+                <div key={i} style={{padding:"12px 0",borderBottom:"1px solid rgba(255,255,255,.05)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,marginBottom:3}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric",month:"short"})}</div>
+                    <div style={{fontSize:11,color:"rgba(232,245,232,.32)",lineHeight:1.5}}>{e.today?.meals?.length||0} comidas · {e.today?.drinks?.length||0} bebidas{e.today?.training?` · ${e.today.training.slice(0,20)}`:""}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:16,fontWeight:900,color:"#4ade80"}}>{e.today?.weight?`${e.today.weight}kg`:"—"}</div>
+                    {e.today?.grasa&&<div style={{fontSize:10,color:"rgba(251,146,60,.7)"}}>{e.today.grasa}%</div>}
+                  </div>
+                </div>))}
+          </>;
+        })()}
       </div>
 
       {showNav&&(
         <div style={g.nav}>
-          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"}].map(n=>(
+          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"}].map(n=>(
             <button key={n.id} style={g.nb(screen===n.id)} onClick={()=>setScreen(n.id)}>
               <span style={{fontSize:20}}>{n.icon}</span>{n.label}
             </button>))}
