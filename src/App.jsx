@@ -348,6 +348,18 @@ export default function App() {
               ?<button style={g.btnS} onClick={()=>{setAiText(todayEntry.feedback);setScreen("result");}}>Ver feedback</button>
               :<button style={g.btnP} onClick={analyzeDay}>Analizar mi día →</button>}
           </div>
+
+          <div style={{...g.card, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+            <div>
+              <div style={g.sec}>🔔 Notificaciones</div>
+              <div style={{fontSize:12,color:"rgba(232,245,232,.45)"}}>
+                {typeof Notification!=="undefined"&&Notification.permission==="granted"?"Activadas — 8:00, 16:00, 21:00":"Recibe avisos para registrar comidas"}
+              </div>
+            </div>
+            <button onClick={requestNotifications} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:10,color:"#4ade80",fontSize:12,fontWeight:700,padding:"8px 14px",cursor:"pointer",flexShrink:0}}>
+              {typeof Notification!=="undefined"&&Notification.permission==="granted"?"✅ Activas":"Activar"}
+            </button>
+          </div>
         </>}
 
         {screen==="addMeal"&&<>
