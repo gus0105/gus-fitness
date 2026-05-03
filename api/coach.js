@@ -7,7 +7,19 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { prompt, system } = req.body;
+    const { prompt, system, image } = req.body;
+
+    // Build message content - support image if provided
+    let content;
+    if (image) {
+      content = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+        { type: "text", text: prompt }
+      ];
+    } else {
+      content = prompt;
+    }
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -19,7 +31,7 @@ export default async function handler(req, res) {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 1024,
         system,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content }],
       }),
     });
     const data = await response.json();
