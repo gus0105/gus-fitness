@@ -90,6 +90,31 @@ export default function App() {
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
+    const TIMES = ["08:00", "16:00", "21:00"];
+    const register = async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+        if (Notification.permission === "granted") {
+          reg.active?.postMessage({ type: "SCHEDULE_NOTIFICATIONS", times: TIMES });
+        }
+      } catch {}
+    };
+    register();
+  }, []);
+
+  const requestNotifications = async () => {
+    if (!("Notification" in window)) { alert("Tu navegador no soporta notificaciones."); return; }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      const reg = await navigator.serviceWorker.ready;
+      reg.active?.postMessage({ type: "SCHEDULE_NOTIFICATIONS", times: ["08:00", "16:00", "21:00"] });
+      alert("Notificaciones activadas. Te avisare a las 8:00, 16:00 y 21:00.");
+    }
+  };
+
   const todayRef = useRef(today);
   todayRef.current = today;
 
