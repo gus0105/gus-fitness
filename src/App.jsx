@@ -80,6 +80,10 @@ export default function App() {
   const [mealProt, setMealProt]   = useState("");
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
+  const [mealPhoto, setMealPhoto]   = useState(null);
+  const [mealPhotoB64, setPhotoB64] = useState(null);
+  const [analyzingPhoto, setAnPh]   = useState(false);
+  const fileRef = useRef(null);
   const chatEnd = useRef(null);
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -158,14 +162,50 @@ export default function App() {
 
   const saveWeight = () => { if (wInput) setT({ weight: wInput, grasa: gInput, imc: imcInput }); };
 
+  const analyzePhoto = async (b64) => {
+    setAnPh(true);
+    try {
+      const res = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          image: b64,
+          prompt: "Analiza esta foto de comida y estima los macronutrientes. Responde SOLO con un JSON así, sin texto extra: {\"desc\":\"descripción breve del plato\",\"prot\":25,\"carb\":40,\"fat\":12}. Usa gramos enteros. Si no puedes estimar, pon 0.",
+          system: "Eres un nutricionista experto. Analizas fotos de comida y estimas macronutrientes con precisión. Respondes siempre en JSON puro sin markdown."
+        }),
+      });
+      const json = await res.json();
+      const raw = json.text?.replace(/```json|```/g,"").trim();
+      const data = JSON.parse(raw);
+      if (data.desc && !mealDesc) setMealDesc(data.desc);
+      if (data.prot) setMealProt(String(data.prot));
+      if (data.carb) setMealCarb(String(data.carb));
+      if (data.fat)  setMealFat(String(data.fat));
+    } catch {}
+    setAnPh(false);
+  };
+
+  const handlePhotoChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setMealPhoto(URL.createObjectURL(file));
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = reader.result.split(",")[1];
+      setPhotoB64(b64);
+      analyzePhoto(b64);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const addMeal = () => {
     if (!mealDesc.trim()) return;
-    const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime() };
+    const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime(), photo: mealPhoto };
     if (mealProt) meal.prot = parseFloat(mealProt);
     if (mealCarb) meal.carb = parseFloat(mealCarb);
     if (mealFat)  meal.fat  = parseFloat(mealFat);
     setT({ meals: [...today.meals, meal] });
-    setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setScreen("home");
+    setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
   };
 
   const addDrink = () => {
@@ -449,6 +489,26 @@ export default function App() {
             <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:18}}>
               {MEALS.map(m=><button key={m.id} style={g.chip(mealSlot===m.id)} onClick={()=>setMealSlot(m.id)}>{m.icon} {m.label}</button>)}
             </div>
+            <label style={g.lbl}>Foto del plato (opcional)</label>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoChange}/>
+            {!mealPhoto ? (
+              <div onClick={()=>fileRef.current?.click()} style={{width:"100%",height:130,borderRadius:14,border:"2px dashed rgba(74,222,128,.2)",background:"rgba(255,255,255,.03)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",marginBottom:14}}>
+                <div style={{fontSize:28,marginBottom:6}}>📷</div>
+                <div style={{fontSize:12,color:"rgba(232,245,232,.3)"}}>Toca para añadir foto</div>
+                <div style={{fontSize:10,color:"rgba(74,222,128,.4)",marginTop:3}}>Claude estimará los macros automáticamente</div>
+              </div>
+            ) : (
+              <div style={{position:"relative",marginBottom:14}}>
+                <img src={mealPhoto} style={{width:"100%",height:160,objectFit:"cover",borderRadius:14}}/>
+                {analyzingPhoto && (
+                  <div style={{position:"absolute",inset:0,background:"rgba(8,11,15,.7)",borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+                    <div style={{fontSize:24}}>⚡</div>
+                    <div style={{fontSize:12,color:"#4ade80"}}>Analizando macros...</div>
+                  </div>
+                )}
+                <button onClick={()=>{setMealPhoto(null);setPhotoB64(null);}} style={{position:"absolute",top:8,right:8,background:"rgba(8,11,15,.8)",border:"none",borderRadius:20,color:"#e8f5e8",width:28,height:28,cursor:"pointer",fontSize:14}}>×</button>
+              </div>
+            )}
             <label style={g.lbl}>¿Qué comiste?</label>
             <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz..." value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
             <label style={g.lbl}>Macros estimados (opcional)</label>
