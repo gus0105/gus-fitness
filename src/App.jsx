@@ -133,9 +133,9 @@ export default function App() {
   const [editingMealId, setEditingMealId] = useState(null);
   const [editingMealTime, setEditingMealTime] = useState("");
   const [supplements, setSupplements] = useState([
-    { id: "creatina", label: "Creatina", icon: "⚡" },
-    { id: "magnesio", label: "Magnesio", icon: "🌙" },
-    { id: "ashwaganda", label: "Ashwaganda", icon: "🌿" },
+    { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
+    { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
+    { id: "ashwaganda", label: "Ashwaganda", icon: "🌿", doses: 2 },
   ]);
   const [kcalGoal, setKcalGoal] = useState(2000);
   const [editingSettings, setEditingSettings] = useState(false);
@@ -328,9 +328,10 @@ export default function App() {
     setEditingMealId(null);
   };
 
-  const toggleSupp = (suppId) => {
+  const toggleSupp = (suppId, doseIndex) => {
+    const key = doseIndex !== undefined ? `${suppId}_${doseIndex}` : suppId;
     const taken = today.suppsTaken || [];
-    const updated = taken.includes(suppId) ? taken.filter(s => s !== suppId) : [...taken, suppId];
+    const updated = taken.includes(key) ? taken.filter(s => s !== key) : [...taken, key];
     setT({ suppsTaken: updated });
   };
 
@@ -353,8 +354,13 @@ export default function App() {
         if (!meal.prot && data.prot) updatedMeal.prot = data.prot;
         if (!meal.carb && data.carb) updatedMeal.carb = data.carb;
         if (!meal.fat  && data.fat)  updatedMeal.fat  = data.fat;
-        const updatedMeals = currentMeals.map(m => m.id === meal.id ? updatedMeal : m);
-        setT({ meals: updatedMeals });
+        // Use todayRef to always get latest meals state
+        const latestMeals = todayRef.current.meals;
+        const updatedMeals = latestMeals.map(m => m.id === meal.id ? updatedMeal : m);
+        const updatedToday = { ...todayRef.current, meals: updatedMeals };
+        setTodayRaw(updatedToday);
+        todayRef.current = updatedToday;
+        persist(null, updatedToday);
       }
     } catch {}
   };
@@ -368,7 +374,7 @@ export default function App() {
 
   const addMeal = () => {
     if (!mealDesc.trim()) return;
-    const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime(), photo: mealPhoto };
+    const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime() };
     if (mealProt) meal.prot = parseFloat(mealProt);
     if (mealCarb) meal.carb = parseFloat(mealCarb);
     if (mealFat)  meal.fat  = parseFloat(mealFat);
@@ -635,16 +641,28 @@ export default function App() {
               <div style={g.sec}>💊 Suplementos</div>
               <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                 {supplements.map(s=>{
-                  const taken=(today.suppsTaken||[]).includes(s.id);
+                  const doses = s.doses || 1;
+                  const takenCount = Array.from({length:doses},(_,i)=>`${s.id}_${i}`).filter(k=>(today.suppsTaken||[]).includes(k)).length;
+                  const allTaken = takenCount === doses;
+                  const pct = doses > 0 ? takenCount/doses : 0;
                   return(
-                    <div key={s.id} onClick={()=>toggleSupp(s.id)}
-                      style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,cursor:"pointer",
-                        background:taken?"rgba(74,222,128,.12)":"rgba(255,255,255,.04)",
-                        border:taken?"1px solid rgba(74,222,128,.4)":"1px solid rgba(255,255,255,.1)",
+                    <div key={s.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,
+                        background:allTaken?"rgba(74,222,128,.12)":takenCount>0?"rgba(74,222,128,.06)":"rgba(255,255,255,.04)",
+                        border:allTaken?"1px solid rgba(74,222,128,.4)":takenCount>0?"1px solid rgba(74,222,128,.2)":"1px solid rgba(255,255,255,.1)",
                         transition:"all .2s"}}>
-                      <div style={{fontSize:24,filter:taken?"none":"grayscale(1)",opacity:taken?1:.4}}>{s.icon}</div>
-                      <div style={{fontSize:10,fontWeight:600,color:taken?"#4ade80":"rgba(232,245,232,.4)"}}>{s.label}</div>
-                      <div style={{width:6,height:6,borderRadius:"50%",background:taken?"#4ade80":"rgba(255,255,255,.15)"}}/>
+                      <div style={{fontSize:24,filter:takenCount>0?"none":"grayscale(1)",opacity:takenCount>0?1:.4}}>{s.icon}</div>
+                      <div style={{fontSize:10,fontWeight:600,color:allTaken?"#4ade80":takenCount>0?"rgba(74,222,128,.7)":"rgba(232,245,232,.4)"}}>{s.label}</div>
+                      {doses===1
+                        ? <div onClick={()=>toggleSupp(s.id,"0")} style={{width:20,height:20,borderRadius:"50%",background:takenCount>0?"#4ade80":"rgba(255,255,255,.1)",cursor:"pointer",border:"2px solid rgba(74,222,128,.3)",transition:"all .2s"}}/>
+                        : <div style={{display:"flex",gap:4}}>
+                            {Array.from({length:doses},(_,i)=>{
+                              const k=`${s.id}_${i}`;
+                              const t=(today.suppsTaken||[]).includes(k);
+                              return <div key={i} onClick={()=>toggleSupp(s.id,i)}
+                                style={{width:16,height:16,borderRadius:"50%",background:t?"#4ade80":"rgba(255,255,255,.1)",cursor:"pointer",border:"2px solid rgba(74,222,128,.3)",transition:"all .2s"}}/>;
+                            })}
+                          </div>
+                      }
                     </div>
                   );
                 })}
@@ -695,26 +713,13 @@ export default function App() {
             <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:18}}>
               {MEALS.map(m=><button key={m.id} style={g.chip(mealSlot===m.id)} onClick={()=>setMealSlot(m.id)}>{m.icon} {m.label}</button>)}
             </div>
-            <label style={g.lbl}>Foto del plato (opcional)</label>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoChange}/>
-            {!mealPhoto ? (
-              <div onClick={()=>fileRef.current?.click()} style={{width:"100%",height:130,borderRadius:14,border:"2px dashed rgba(74,222,128,.2)",background:"rgba(255,255,255,.03)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",marginBottom:14}}>
-                <div style={{fontSize:28,marginBottom:6}}>📷</div>
-                <div style={{fontSize:12,color:"rgba(232,245,232,.3)"}}>Toca para añadir foto</div>
-                <div style={{fontSize:10,color:"rgba(74,222,128,.4)",marginTop:3}}>Claude estimará los macros automáticamente</div>
-              </div>
-            ) : (
-              <div style={{position:"relative",marginBottom:14}}>
-                <img src={mealPhoto} style={{width:"100%",height:160,objectFit:"cover",borderRadius:14}}/>
-                {analyzingPhoto && (
-                  <div style={{position:"absolute",inset:0,background:"rgba(8,11,15,.7)",borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
-                    <div style={{fontSize:24}}>⚡</div>
-                    <div style={{fontSize:12,color:"#4ade80"}}>Analizando macros...</div>
-                  </div>
-                )}
-                <button onClick={()=>{setMealPhoto(null);setPhotoB64(null);}} style={{position:"absolute",top:8,right:8,background:"rgba(8,11,15,.8)",border:"none",borderRadius:20,color:"#e8f5e8",width:28,height:28,cursor:"pointer",fontSize:14}}>×</button>
-              </div>
-            )}
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <button onClick={()=>fileRef.current?.click()} style={{flex:1,padding:"12px",borderRadius:14,border:"2px dashed rgba(74,222,128,.2)",background:mealPhoto?"rgba(74,222,128,.08)":"rgba(255,255,255,.03)",color:mealPhoto?"#4ade80":"rgba(232,245,232,.3)",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                {analyzingPhoto ? <><span style={{fontSize:16}}>⚡</span> Analizando...</> : mealPhoto ? <><span>📷</span> Foto añadida ✓</> : <><span>📷</span> Añadir foto (estima macros)</>}
+              </button>
+              {mealPhoto&&<button onClick={()=>{setMealPhoto(null);setPhotoB64(null);}} style={{padding:"12px 14px",borderRadius:14,border:"1px solid rgba(248,113,113,.2)",background:"rgba(248,113,113,.05)",color:"#f87171",fontSize:13,cursor:"pointer"}}>×</button>}
+            </div>
             <label style={g.lbl}>¿Qué comiste?</label>
             <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz..." value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
             <label style={g.lbl}>Macros estimados (opcional)</label>
@@ -926,8 +931,19 @@ export default function App() {
                     <span style={{fontSize:22}}>{s.icon}</span>
                     <span style={{fontSize:14,fontWeight:600}}>{s.label}</span>
                   </div>
-                  <button onClick={()=>saveSettings(null,supplements.filter((_,j)=>j!==i))}
-                    style={{background:"rgba(248,113,113,.1)",border:"1px solid rgba(248,113,113,.2)",borderRadius:8,color:"#f87171",fontSize:12,padding:"4px 10px",cursor:"pointer"}}>Eliminar</button>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:10,color:"rgba(232,245,232,.4)"}}>Tomas:</span>
+                      {[1,2,3,4].map(n=>(
+                        <button key={n} onClick={()=>saveSettings(null,supplements.map((x,j)=>j===i?{...x,doses:n}:x))}
+                          style={{width:24,height:24,borderRadius:"50%",border:s.doses===n?"1px solid #4ade80":"1px solid rgba(255,255,255,.15)",background:s.doses===n?"rgba(74,222,128,.15)":"rgba(255,255,255,.04)",color:s.doses===n?"#4ade80":"rgba(232,245,232,.4)",fontSize:11,cursor:"pointer",fontWeight:s.doses===n?700:400}}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={()=>saveSettings(null,supplements.filter((_,j)=>j!==i))}
+                      style={{background:"rgba(248,113,113,.1)",border:"1px solid rgba(248,113,113,.2)",borderRadius:8,color:"#f87171",fontSize:12,padding:"4px 10px",cursor:"pointer"}}>Eliminar</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -941,7 +957,7 @@ export default function App() {
             </div>
             <button style={{...g.btnS,marginBottom:0}} onClick={()=>{
               if(!newSupName.trim()) return;
-              const newS = [...supplements,{id:Date.now().toString(),label:newSupName.trim(),icon:newSupIcon||"💊"}];
+              const newS = [...supplements,{id:Date.now().toString(),label:newSupName.trim(),icon:newSupIcon||"💊",doses:1}];
               saveSettings(null,newS);
               setNewSupName(""); setNewSupIcon("💊");
             }}>+ Añadir suplemento</button>
@@ -1111,22 +1127,25 @@ export default function App() {
             <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:20}}>
               {today.meals.find(m=>m.id===editingMealId)?.desc?.slice(0,50)}
             </div>
-            <div style={{overflowX:"auto",display:"flex",gap:8,marginBottom:16,paddingBottom:4}}>
-              {["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t=>(
-                <button key={t} onClick={()=>setEditingMealTime(t)}
-                  style={{padding:"8px 10px",borderRadius:10,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.1)",
-                    background:editingMealTime===t?"rgba(74,222,128,.15)":"rgba(255,255,255,.04)",
-                    color:editingMealTime===t?"#4ade80":"rgba(232,245,232,.5)",fontSize:11,cursor:"pointer",flexShrink:0}}>
-                  {t}
-                </button>
-              ))}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:24}}>
+              <button onClick={()=>{
+                const [h,m]=editingMealTime.split(":").map(Number);
+                const newM=m===0?30:0; const newH=m===0?h:h+1>=24?0:h+1;
+                setEditingMealTime(`${String(newH).padStart(2,"0")}:${String(newM).padStart(2,"0")}`);
+              }} style={{width:44,height:44,borderRadius:"50%",border:"1px solid rgba(255,255,255,.15)",background:"rgba(255,255,255,.05)",color:"#e8f5e8",fontSize:20,cursor:"pointer"}}>+</button>
+              <div style={{fontSize:48,fontWeight:900,color:"#4ade80",letterSpacing:2,minWidth:120,textAlign:"center"}}>{editingMealTime||"12:00"}</div>
+              <button onClick={()=>{
+                const [h,m]=editingMealTime.split(":").map(Number);
+                const newM=m===30?0:30; const newH=m===30?h:h-1<0?23:h-1;
+                setEditingMealTime(`${String(newH).padStart(2,"0")}:${String(newM).padStart(2,"0")}`);
+              }} style={{width:44,height:44,borderRadius:"50%",border:"1px solid rgba(255,255,255,.15)",background:"rgba(255,255,255,.05)",color:"#e8f5e8",fontSize:20,cursor:"pointer"}}>−</button>
             </div>
             <div style={{overflowX:"auto",display:"flex",gap:6,marginBottom:20,paddingBottom:4}}>
-              {["06:30","07:30","08:30","09:30","10:30","11:30","12:30","13:30","14:30","15:30","16:30","17:30","18:30","19:30","20:30","21:30","22:30"].map(t=>(
+              {["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t=>(
                 <button key={t} onClick={()=>setEditingMealTime(t)}
-                  style={{padding:"6px 8px",borderRadius:8,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.07)",
-                    background:editingMealTime===t?"rgba(74,222,128,.15)":"rgba(255,255,255,.02)",
-                    color:editingMealTime===t?"#4ade80":"rgba(232,245,232,.35)",fontSize:10,cursor:"pointer",flexShrink:0}}>
+                  style={{padding:"7px 10px",borderRadius:10,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.08)",
+                    background:editingMealTime===t?"rgba(74,222,128,.15)":"rgba(255,255,255,.03)",
+                    color:editingMealTime===t?"#4ade80":"rgba(232,245,232,.4)",fontSize:11,cursor:"pointer",flexShrink:0,fontWeight:editingMealTime===t?700:400}}>
                   {t}
                 </button>
               ))}
@@ -1138,7 +1157,7 @@ export default function App() {
               </button>
               <button onClick={()=>updateMealTime(editingMealId,editingMealTime)}
                 style={{flex:2,padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer"}}>
-                Guardar hora ✓
+                Guardar ✓
               </button>
             </div>
           </div>
