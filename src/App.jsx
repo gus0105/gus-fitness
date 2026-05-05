@@ -482,7 +482,7 @@ export default function App() {
             <div style={g.sbox}><div style={g.sv}>{today.meals.length}</div><div style={g.sl}>comidas</div></div>
           </div>
 
-          {!today.weight ? (
+          {!wInput ? (
             <div style={g.cardG}>
               <div style={g.sec}>⚖️ Medición de hoy</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
@@ -510,7 +510,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              {wInput!==""&&<button style={{...g.btnP,marginBottom:0}} onClick={saveWeight}>Guardar medición ✓</button>}
+              {wInput&&<button style={{...g.btnP,marginBottom:0}} onClick={saveWeight}>Guardar medición ✓</button>}
             </div>
           ):(
             <div style={{...g.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1055,6 +1055,48 @@ export default function App() {
           </>;
         })()}
       </div>
+
+      {editingMealId&&(
+        <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+          <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.6)"}} onClick={()=>setEditingMealId(null)}/>
+          <div style={{position:"relative",background:"#0f1a0f",borderRadius:"20px 20px 0 0",padding:"24px 24px 40px",border:"1px solid rgba(74,222,128,.2)"}}>
+            <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>✏️ Editar hora</div>
+            <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:20}}>
+              {today.meals.find(m=>m.id===editingMealId)?.desc?.slice(0,50)}
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t=>(
+                <button key={t} onClick={()=>setEditingMealTime(t)}
+                  style={{padding:"8px 10px",borderRadius:10,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.1)",
+                    background:editingMealTime===t?"rgba(74,222,128,.15)":"rgba(255,255,255,.04)",
+                    color:editingMealTime===t?"#4ade80":"rgba(232,245,232,.5)",fontSize:11,cursor:"pointer",flexShrink:0}}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div style={{overflowX:"auto",display:"flex",gap:6,marginBottom:20,paddingBottom:4}}>
+              {["06:30","07:30","08:30","09:30","10:30","11:30","12:30","13:30","14:30","15:30","16:30","17:30","18:30","19:30","20:30","21:30","22:30"].map(t=>(
+                <button key={t} onClick={()=>setEditingMealTime(t)}
+                  style={{padding:"6px 8px",borderRadius:8,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.07)",
+                    background:editingMealTime===t?"rgba(74,222,128,.15)":"rgba(255,255,255,.02)",
+                    color:editingMealTime===t?"#4ade80":"rgba(232,245,232,.35)",fontSize:10,cursor:"pointer",flexShrink:0}}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setEditingMealId(null)}
+                style={{flex:1,padding:"14px",borderRadius:14,border:"1px solid rgba(255,255,255,.1)",background:"rgba(255,255,255,.04)",color:"rgba(232,245,232,.5)",fontSize:14,cursor:"pointer"}}>
+                Cancelar
+              </button>
+              <button onClick={()=>updateMealTime(editingMealId,editingMealTime)}
+                style={{flex:2,padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer"}}>
+                Guardar hora ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNav&&(
         <div style={g.nav}>
