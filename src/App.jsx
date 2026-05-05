@@ -96,6 +96,7 @@ export default function App() {
   const [mealProt, setMealProt]   = useState("");
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
+  const [mealKcal, setMealKcal]   = useState("");
   const [mealPhoto, setMealPhoto]   = useState(null);
   const [mealPhotoB64, setPhotoB64] = useState(null);
   const [analyzingPhoto, setAnPh]   = useState(false);
@@ -242,7 +243,7 @@ export default function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           image: b64,
-          prompt: "Analiza esta foto de comida y estima los macronutrientes. Responde SOLO con un JSON así, sin texto extra: {\"desc\":\"descripción breve del plato\",\"prot\":25,\"carb\":40,\"fat\":12}. Usa gramos enteros. Si no puedes estimar, pon 0.",
+          prompt: "Analiza esta foto de comida y estima los macronutrientes y calorías. Responde SOLO con un JSON así, sin texto extra: {\"desc\":\"descripción breve del plato\",\"prot\":25,\"carb\":40,\"fat\":12,\"kcal\":350}. Usa gramos enteros y kcal redondeadas. Si no puedes estimar, pon 0.",
           system: "Eres un nutricionista experto. Analizas fotos de comida y estimas macronutrientes con precisión. Respondes siempre en JSON puro sin markdown."
         }),
       });
@@ -253,6 +254,7 @@ export default function App() {
       if (data.prot) setMealProt(String(data.prot));
       if (data.carb) setMealCarb(String(data.carb));
       if (data.fat)  setMealFat(String(data.fat));
+      if (data.kcal) setMealKcal(String(data.kcal));
     } catch {}
     setAnPh(false);
   };
@@ -295,9 +297,10 @@ export default function App() {
     if (mealProt) meal.prot = parseFloat(mealProt);
     if (mealCarb) meal.carb = parseFloat(mealCarb);
     if (mealFat)  meal.fat  = parseFloat(mealFat);
-    if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
+    if (mealKcal) meal.kcal = parseInt(mealKcal);
+    else if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
     setT({ meals: [...today.meals, meal] });
-    setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
+    setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealKcal(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
   };
 
   const addDrink = () => {
@@ -308,7 +311,7 @@ export default function App() {
 
   const buildContext = () => {
     const mealTxt = today.meals.length
-      ? today.meals.map(m => { const macros = [m.prot?`P:${m.prot}g`:"",m.carb?`C:${m.carb}g`:"",m.fat?`G:${m.fat}g`:""].filter(Boolean).join(" "); return `- ${MEALS.find(x=>x.id===m.slot)?.label} (${m.time}): ${m.desc}${macros?" ["+macros+"]":""}`; }).join("\n")
+      ? today.meals.map(m => { const macros = [m.prot?`P:${m.prot}g`:"",m.carb?`C:${m.carb}g`:"",m.fat?`G:${m.fat}g`:"",m.kcal?`${m.kcal}kcal`:""].filter(Boolean).join(" "); return `- ${MEALS.find(x=>x.id===m.slot)?.label} (${m.time}): ${m.desc}${macros?" ["+macros+"]":""}`; }).join("\n")
       : "Sin comidas";
     const drinkTxt = today.drinks.length
       ? today.drinks.map(d => `- ${DRINKS.find(x => x.id === d.type)?.label}: ${d.amount}${d.unit}`).join("\n")
@@ -337,7 +340,8 @@ export default function App() {
   const analyzeNow = async () => {
     setLoading(true); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora.`;
+    const totalKcalNow = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -351,7 +355,8 @@ export default function App() {
   const analyzeDay = async () => {
     setLoading(true); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado y un ajuste concreto para mañana.`;
+    const totalKcalDay = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -690,6 +695,14 @@ export default function App() {
                     value={mealFat} onChange={e=>setMealFat(e.target.value)}/>
                   <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
                 </div>
+              </div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Calorías totales</div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="numeric" placeholder="ej: 450 (se estima si hay macros)"
+                  value={mealKcal} onChange={e=>setMealKcal(e.target.value)}/>
+                <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kcal</span>
               </div>
             </div>
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
