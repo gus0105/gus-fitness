@@ -45,7 +45,7 @@ function nowTime() {
   return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
-const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "" };
+const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", suppsTaken: [], kcal: 0 };
 
 async function callClaude(userPrompt) {
   const response = await fetch("/api/coach", {
@@ -82,6 +82,17 @@ export default function App() {
   const [calMonth, setCalMonth]   = useState(new Date().getMonth());
   const [selDay, setSelDay]       = useState(null);
   const [expandedMonths, setExpandedMonths] = useState({});
+  const [editingMealId, setEditingMealId] = useState(null);
+  const [editingMealTime, setEditingMealTime] = useState("");
+  const [supplements, setSupplements] = useState([
+    { id: "creatina", label: "Creatina", icon: "⚡" },
+    { id: "magnesio", label: "Magnesio", icon: "🌙" },
+    { id: "ashwaganda", label: "Ashwaganda", icon: "🌿" },
+  ]);
+  const [kcalGoal, setKcalGoal] = useState(2000);
+  const [editingSettings, setEditingSettings] = useState(false);
+  const [newSupName, setNewSupName] = useState("");
+  const [newSupIcon, setNewSupIcon] = useState("💊");
   const [mealProt, setMealProt]   = useState("");
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
@@ -91,6 +102,26 @@ export default function App() {
   const fileRef = useRef(null);
   const chatEnd = useRef(null);
   const todayStr = new Date().toISOString().split("T")[0];
+
+  // Load settings from localStorage
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("gus_settings");
+      if (s) {
+        const p = JSON.parse(s);
+        if (p.kcalGoal) setKcalGoal(p.kcalGoal);
+        if (p.supplements) setSupplements(p.supplements);
+      }
+    } catch {}
+  }, []);
+
+  const saveSettings = (newKcal, newSupps) => {
+    const k = newKcal ?? kcalGoal;
+    const s = newSupps ?? supplements;
+    setKcalGoal(k);
+    setSupplements(s);
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s }));
+  };
 
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({
@@ -239,12 +270,32 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const updateMealTime = (id, newTime) => {
+    const updated = today.meals.map(m => m.id === id ? {...m, time: newTime} : m);
+    setT({ meals: updated });
+    setEditingMealId(null);
+  };
+
+  const toggleSupp = (suppId) => {
+    const taken = today.suppsTaken || [];
+    const updated = taken.includes(suppId) ? taken.filter(s => s !== suppId) : [...taken, suppId];
+    setT({ suppsTaken: updated });
+  };
+
+  const estimateKcal = (meal) => {
+    const p = meal.prot || 0;
+    const c = meal.carb || 0;
+    const f = meal.fat  || 0;
+    return Math.round(p * 4 + c * 4 + f * 9);
+  };
+
   const addMeal = () => {
     if (!mealDesc.trim()) return;
     const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime(), photo: mealPhoto };
     if (mealProt) meal.prot = parseFloat(mealProt);
     if (mealCarb) meal.carb = parseFloat(mealCarb);
     if (mealFat)  meal.fat  = parseFloat(mealFat);
+    if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
     setT({ meals: [...today.meals, meal] });
     setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
   };
@@ -408,7 +459,7 @@ export default function App() {
     </div>
   );
 
-  const showNav = ["home","stats","history","chat"].includes(screen);
+  const showNav = ["home","stats","history","chat","settings"].includes(screen);
 
   return (
     <div style={g.page}>
@@ -505,6 +556,49 @@ export default function App() {
             <input style={{...g.inp,marginBottom:0}} placeholder="ej: pecho y tríceps 45min. O: descanso"
               value={today.training} onChange={e=>setT({training:e.target.value})}/>
           </div>
+
+          {(()=>{
+            const totalKcal = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
+            const pct = Math.min(100, Math.round((totalKcal/kcalGoal)*100));
+            const barColor = pct>100?"#f87171":pct>75?"#fbbf24":"#4ade80";
+            return totalKcal>0||kcalGoal>0 ? (
+              <div style={g.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={g.sec}>🔥 Calorías</div>
+                  <span style={{fontSize:12,fontWeight:700,color:pct>100?"#f87171":"#4ade80"}}>{totalKcal} / {kcalGoal} kcal</span>
+                </div>
+                <div style={{background:"rgba(255,255,255,.08)",borderRadius:99,height:8,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:99,background:barColor,width:`${pct}%`,transition:"width .5s ease"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
+                  <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{pct}% del objetivo</span>
+                  <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{Math.max(0,kcalGoal-totalKcal)} restantes</span>
+                </div>
+              </div>
+            ) : null;
+          })()}
+
+          {supplements.length>0&&(
+            <div style={g.card}>
+              <div style={g.sec}>💊 Suplementos</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                {supplements.map(s=>{
+                  const taken=(today.suppsTaken||[]).includes(s.id);
+                  return(
+                    <div key={s.id} onClick={()=>toggleSupp(s.id)}
+                      style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,cursor:"pointer",
+                        background:taken?"rgba(74,222,128,.12)":"rgba(255,255,255,.04)",
+                        border:taken?"1px solid rgba(74,222,128,.4)":"1px solid rgba(255,255,255,.1)",
+                        transition:"all .2s"}}>
+                      <div style={{fontSize:24,filter:taken?"none":"grayscale(1)",opacity:taken?1:.4}}>{s.icon}</div>
+                      <div style={{fontSize:10,fontWeight:600,color:taken?"#4ade80":"rgba(232,245,232,.4)"}}>{s.label}</div>
+                      <div style={{width:6,height:6,borderRadius:"50%",background:taken?"#4ade80":"rgba(255,255,255,.15)"}}/>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div style={g.card}><div style={g.sec}>📈 Evolución peso</div><Chart/></div>
 
@@ -749,6 +843,57 @@ export default function App() {
           })()}
         </>}
 
+
+        {screen==="settings"&&<>
+          <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>⚙️ Ajustes</div>
+
+          <div style={g.card}>
+            <div style={g.sec}>🔥 Objetivo de calorías diarias</div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="numeric"
+                value={kcalGoal} onChange={e=>setKcalGoal(parseInt(e.target.value)||0)}/>
+              <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>kcal</span>
+            </div>
+            <button style={{...g.btnP,marginTop:12,marginBottom:0}} onClick={()=>saveSettings(kcalGoal,null)}>Guardar objetivo ✓</button>
+          </div>
+
+          <div style={g.card}>
+            <div style={g.sec}>💊 Mis suplementos</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+              {supplements.map((s,i)=>(
+                <div key={s.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:"rgba(255,255,255,.03)",borderRadius:12,border:"1px solid rgba(255,255,255,.07)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:22}}>{s.icon}</span>
+                    <span style={{fontSize:14,fontWeight:600}}>{s.label}</span>
+                  </div>
+                  <button onClick={()=>saveSettings(null,supplements.filter((_,j)=>j!==i))}
+                    style={{background:"rgba(248,113,113,.1)",border:"1px solid rgba(248,113,113,.2)",borderRadius:8,color:"#f87171",fontSize:12,padding:"4px 10px",cursor:"pointer"}}>Eliminar</button>
+                </div>
+              ))}
+            </div>
+
+            <div style={g.sec}>Añadir suplemento</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...g.inp,marginBottom:0,width:60,textAlign:"center",fontSize:20,padding:"10px 6px"}}
+                placeholder="💊" value={newSupIcon} onChange={e=>setNewSupIcon(e.target.value)}/>
+              <input style={{...g.inp,marginBottom:0,flex:1}} placeholder="Nombre (ej: Vitamina D)"
+                value={newSupName} onChange={e=>setNewSupName(e.target.value)}/>
+            </div>
+            <button style={{...g.btnS,marginBottom:0}} onClick={()=>{
+              if(!newSupName.trim()) return;
+              const newS = [...supplements,{id:Date.now().toString(),label:newSupName.trim(),icon:newSupIcon||"💊"}];
+              saveSettings(null,newS);
+              setNewSupName(""); setNewSupIcon("💊");
+            }}>+ Añadir suplemento</button>
+          </div>
+
+          <div style={g.card}>
+            <div style={g.sec}>👤 Cuenta</div>
+            <div style={{fontSize:13,color:"rgba(232,245,232,.5)",marginBottom:14}}>{user?.email}</div>
+            <button style={{...g.btnS,marginBottom:0,borderColor:"rgba(248,113,113,.2)",color:"#f87171"}} onClick={signOut}>Cerrar sesión</button>
+          </div>
+        </>}
+
         {screen==="history"&&(()=>{
           const entryMap = {};
           entries.forEach(e => { entryMap[e.date] = e; });
@@ -900,7 +1045,7 @@ export default function App() {
 
       {showNav&&(
         <div style={g.nav}>
-          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"}].map(n=>(
+          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
             <button key={n.id} style={g.nb(screen===n.id)} onClick={()=>setScreen(n.id)}>
               <span style={{fontSize:20}}>{n.icon}</span>{n.label}
             </button>))}
