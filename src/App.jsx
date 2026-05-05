@@ -334,6 +334,31 @@ export default function App() {
     setT({ suppsTaken: updated });
   };
 
+  const estimateKcalFromDesc = async (meal, currentMeals) => {
+    if (meal.kcal) return; // already has kcal
+    try {
+      const res = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: `Estima las calorías y macros de esta comida: "${meal.desc}". Responde SOLO con JSON sin texto extra: {"kcal":350,"prot":25,"carb":40,"fat":12}. Usa números enteros. Si no puedes estimar, usa 0.`,
+          system: "Eres un nutricionista experto. Estimas calorías y macros de comidas descritas en texto. Respondes siempre en JSON puro sin markdown ni texto adicional."
+        }),
+      });
+      const json = await res.json();
+      const raw = json.text?.replace(/```json|```/g,"").trim();
+      const data = JSON.parse(raw);
+      if (data.kcal > 0) {
+        const updatedMeal = { ...meal, kcal: data.kcal };
+        if (!meal.prot && data.prot) updatedMeal.prot = data.prot;
+        if (!meal.carb && data.carb) updatedMeal.carb = data.carb;
+        if (!meal.fat  && data.fat)  updatedMeal.fat  = data.fat;
+        const updatedMeals = currentMeals.map(m => m.id === meal.id ? updatedMeal : m);
+        setT({ meals: updatedMeals });
+      }
+    } catch {}
+  };
+
   const estimateKcal = (meal) => {
     const p = meal.prot || 0;
     const c = meal.carb || 0;
@@ -349,8 +374,13 @@ export default function App() {
     if (mealFat)  meal.fat  = parseFloat(mealFat);
     if (mealKcal) meal.kcal = parseInt(mealKcal);
     else if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
-    setT({ meals: [...today.meals, meal] });
+    const newMeals = [...today.meals, meal];
+    setT({ meals: newMeals });
     setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealKcal(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
+    // Estimate kcal in background if not already set
+    if (!meal.kcal && meal.desc) {
+      setTimeout(() => estimateKcalFromDesc(meal, newMeals), 500);
+    }
   };
 
   const addDrink = () => {
