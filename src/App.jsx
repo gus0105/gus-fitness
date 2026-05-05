@@ -58,6 +58,54 @@ async function callClaude(userPrompt) {
   return json.text ?? "Sin respuesta.";
 }
 
+function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
+  const [w, setW] = useState("");
+  const [gr, setGr] = useState("");
+  const [im, setIm] = useState("");
+  const inp = { ...g.inp, marginBottom:0, flex:1, padding:"10px 8px", fontSize:13 };
+  const lbl = { fontSize:9, color:"rgba(74,222,128,.6)", fontWeight:700, letterSpacing:".1em", textTransform:"uppercase", marginBottom:5 };
+
+  if (saved) return (
+    <div style={{...g.card, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+      <div style={{display:"flex", gap:20, alignItems:"center"}}>
+        <div><div style={g.sec}>⚖️ Peso</div><div style={{fontSize:24,fontWeight:900,color:"#4ade80"}}>{weight}<span style={{fontSize:12,fontWeight:600}}>kg</span></div></div>
+        {grasa&&<div><div style={g.sec}>Grasa</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{grasa}<span style={{fontSize:11}}>%</span></div></div>}
+        {imc&&<div><div style={g.sec}>IMC</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{imc}</div></div>}
+      </div>
+      <button style={g.back} onClick={onEdit}>✏️</button>
+    </div>
+  );
+
+  return (
+    <div style={g.cardG}>
+      <div style={g.sec}>⚖️ Medición de hoy</div>
+      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12}}>
+        <div>
+          <div style={lbl}>Peso</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <input style={inp} type="number" inputMode="decimal" placeholder="73.1" value={w} onChange={e=>setW(e.target.value)}/>
+            <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kg</span>
+          </div>
+        </div>
+        <div>
+          <div style={lbl}>% Grasa</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <input style={inp} type="number" inputMode="decimal" placeholder="20.6" value={gr} onChange={e=>setGr(e.target.value)}/>
+            <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>%</span>
+          </div>
+        </div>
+        <div>
+          <div style={lbl}>IMC</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <input style={inp} type="number" inputMode="decimal" placeholder="25.4" value={im} onChange={e=>setIm(e.target.value)}/>
+          </div>
+        </div>
+      </div>
+      {w&&<button style={{...g.btnP,marginBottom:0}} onClick={()=>onSave(w,gr,im)}>Guardar medición ✓</button>}
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen]       = useState("home");
   const [entries, setEntries]     = useState([]);
@@ -233,7 +281,7 @@ export default function App() {
     persist(null, updated);
   };
 
-  const saveWeight = () => { if (wInput) setT({ weight: wInput, grasa: gInput, imc: imcInput }); };
+  const saveWeight = (w, gr, im) => { const wv=w??wInput; const gv=gr??gInput; const iv=im??imcInput; if(wv) setT({ weight: wv, grasa: gv, imc: iv }); };
 
   const analyzePhoto = async (b64) => {
     setAnPh(true);
@@ -482,46 +530,13 @@ export default function App() {
             <div style={g.sbox}><div style={g.sv}>{today.meals.length}</div><div style={g.sl}>comidas</div></div>
           </div>
 
-          {!wInput ? (
-            <div style={g.cardG}>
-              <div style={g.sec}>⚖️ Medición de hoy</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
-                <div>
-                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>Peso</div>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="73.1"
-                      value={wInput} onChange={e=>setWInput(e.target.value)}/>
-                    <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kg</span>
-                  </div>
-                </div>
-                <div>
-                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>% Grasa</div>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="20.6"
-                      value={gInput} onChange={e=>setGInput(e.target.value)}/>
-                    <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>%</span>
-                  </div>
-                </div>
-                <div>
-                  <div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>IMC</div>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="25.4"
-                      value={imcInput} onChange={e=>setImcInput(e.target.value)}/>
-                  </div>
-                </div>
-              </div>
-              {wInput&&<button style={{...g.btnP,marginBottom:0}} onClick={saveWeight}>Guardar medición ✓</button>}
-            </div>
-          ):(
-            <div style={{...g.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{display:"flex",gap:20,alignItems:"center"}}>
-                <div><div style={g.sec}>⚖️ Peso</div><div style={{fontSize:24,fontWeight:900,color:"#4ade80"}}>{today.weight}<span style={{fontSize:12,fontWeight:600}}>kg</span></div></div>
-                {today.grasa&&<div><div style={g.sec}>Grasa</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{today.grasa}<span style={{fontSize:11}}>%</span></div></div>}
-                {today.imc&&<div><div style={g.sec}>IMC</div><div style={{fontSize:18,fontWeight:700,color:"rgba(74,222,128,.8)"}}>{today.imc}</div></div>}
-              </div>
-              <button style={g.back} onClick={()=>{setT({weight:"",grasa:"",imc:""});setWInput("");setGInput("");setImcInput("");}}>✏️</button>
-            </div>
-          )}
+          <WeightCard
+            saved={!!today.weight}
+            weight={today.weight} grasa={today.grasa} imc={today.imc}
+            onSave={(w,gr,im)=>{ setWInput(w); setGInput(gr); setImcInput(im); saveWeight(w,gr,im); }}
+            onEdit={()=>{ setT({weight:"",grasa:"",imc:""}); setWInput(""); setGInput(""); setImcInput(""); }}
+            g={g}
+          />
 
           <div style={g.card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -1064,7 +1079,7 @@ export default function App() {
             <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:20}}>
               {today.meals.find(m=>m.id===editingMealId)?.desc?.slice(0,50)}
             </div>
-            <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <div style={{overflowX:"auto",display:"flex",gap:8,marginBottom:16,paddingBottom:4}}>
               {["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00","22:00","23:00"].map(t=>(
                 <button key={t} onClick={()=>setEditingMealTime(t)}
                   style={{padding:"8px 10px",borderRadius:10,border:editingMealTime===t?"1px solid #4ade80":"1px solid rgba(255,255,255,.1)",
