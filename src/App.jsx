@@ -261,12 +261,14 @@ export default function App() {
 
   const todayRef = useRef(today);
   todayRef.current = today;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const persist = async (newEntries, newToday) => {
     try {
       const t = newToday ?? todayRef.current;
       await supabase.from("entries").upsert({
-        user_id: user?.id || "gus",
+        user_id: userRef.current?.id || "gus",
         date: todayStr,
         data: t,
         feedback: t.feedback ?? null,
@@ -375,7 +377,7 @@ export default function App() {
       || newAnalyses[newAnalyses.length - 1]?.text || text;
     try {
       await supabase.from("entries").upsert({
-        user_id: user?.id || "gus", date: todayStr,
+        user_id: userRef.current?.id || "gus", date: todayStr,
         data: updatedToday,
         feedback: lastFeedback,
       }, { onConflict: "user_id,date" });
@@ -547,7 +549,7 @@ export default function App() {
               :today.meals.map(m=>{const sl=MEALS.find(x=>x.id===m.slot);return(
               <div key={m.id} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.05)"}}>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:10,color:"#4ade80",fontWeight:700,marginBottom:2}}>{sl?.icon} {sl?.label} · {m.time}</div>
+                  <div style={{fontSize:10,color:"#4ade80",fontWeight:700,marginBottom:2}}>{sl?.icon} {sl?.label} · <span onClick={()=>{setEditingMealId(m.id);setEditingMealTime(m.time||"12:00");}} style={{cursor:"pointer",borderBottom:"1px dotted rgba(74,222,128,.5)",paddingBottom:1}}>{m.time} ✏️</span></div>
                   <div style={{fontSize:12,color:"rgba(232,245,232,.65)",lineHeight:1.4}}>{m.desc}</div>
                   {(m.prot||m.carb||m.fat)&&<div style={{fontSize:10,color:"rgba(74,222,128,.5)",marginTop:3}}>{m.prot?`P:${m.prot}g `:""}{m.carb?`C:${m.carb}g `:""}{m.fat?`G:${m.fat}g`:""}</div>}
                 </div>
