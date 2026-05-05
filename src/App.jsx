@@ -646,23 +646,31 @@ export default function App() {
                   const allTaken = takenCount === doses;
                   const pct = doses > 0 ? takenCount/doses : 0;
                   return(
-                    <div key={s.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,
+                    <div key={s.id}
+                      onClick={()=>{
+                        // Find next unfilled dose index (left to right)
+                        const nextIndex = Array.from({length:doses},(_,i)=>i).find(i=>!(today.suppsTaken||[]).includes(`${s.id}_${i}`));
+                        if(nextIndex!==undefined) toggleSupp(s.id, nextIndex);
+                        else {
+                          // All filled — reset all
+                          const updated=(today.suppsTaken||[]).filter(k=>!k.startsWith(`${s.id}_`));
+                          setT({suppsTaken:updated});
+                        }
+                      }}
+                      style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,cursor:"pointer",
                         background:allTaken?"rgba(74,222,128,.12)":takenCount>0?"rgba(74,222,128,.06)":"rgba(255,255,255,.04)",
                         border:allTaken?"1px solid rgba(74,222,128,.4)":takenCount>0?"1px solid rgba(74,222,128,.2)":"1px solid rgba(255,255,255,.1)",
-                        transition:"all .2s"}}>
+                        transition:"all .2s",userSelect:"none"}}>
                       <div style={{fontSize:24,filter:takenCount>0?"none":"grayscale(1)",opacity:takenCount>0?1:.4}}>{s.icon}</div>
                       <div style={{fontSize:10,fontWeight:600,color:allTaken?"#4ade80":takenCount>0?"rgba(74,222,128,.7)":"rgba(232,245,232,.4)"}}>{s.label}</div>
-                      {doses===1
-                        ? <div onClick={()=>toggleSupp(s.id,"0")} style={{width:20,height:20,borderRadius:"50%",background:takenCount>0?"#4ade80":"rgba(255,255,255,.1)",cursor:"pointer",border:"2px solid rgba(74,222,128,.3)",transition:"all .2s"}}/>
-                        : <div style={{display:"flex",gap:4}}>
-                            {Array.from({length:doses},(_,i)=>{
-                              const k=`${s.id}_${i}`;
-                              const t=(today.suppsTaken||[]).includes(k);
-                              return <div key={i} onClick={()=>toggleSupp(s.id,i)}
-                                style={{width:16,height:16,borderRadius:"50%",background:t?"#4ade80":"rgba(255,255,255,.1)",cursor:"pointer",border:"2px solid rgba(74,222,128,.3)",transition:"all .2s"}}/>;
-                            })}
-                          </div>
-                      }
+                      <div style={{display:"flex",gap:4}}>
+                        {Array.from({length:doses},(_,i)=>{
+                          const filled = i < takenCount;
+                          return <div key={i} style={{width:16,height:16,borderRadius:"50%",
+                            background:filled?"#4ade80":"rgba(255,255,255,.1)",
+                            border:"2px solid rgba(74,222,128,.3)",transition:"all .2s",pointerEvents:"none"}}/>;
+                        })}
+                      </div>
                     </div>
                   );
                 })}
