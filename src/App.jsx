@@ -878,13 +878,37 @@ export default function App() {
         </>}
 
         {screen==="result"&&<>
-          <button style={g.back} onClick={()=>setScreen("home")}>← Inicio</button>
+          <button style={g.back} onClick={()=>{
+            if(window.speechSynthesis) window.speechSynthesis.cancel();
+            setScreen("home");
+          }}>← Inicio</button>
           <div style={{marginTop:12}}>
-            <div style={{fontSize:20,fontWeight:900,marginBottom:4}}>Análisis del día</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={{fontSize:20,fontWeight:900}}>Análisis del día</div>
+              {!loading&&aiText&&(()=>{
+                const speaking = typeof window!=="undefined" && window.speechSynthesis?.speaking;
+                return <button onClick={()=>{
+                  if(!window.speechSynthesis) return;
+                  if(window.speechSynthesis.speaking){ window.speechSynthesis.cancel(); return; }
+                  const utt = new SpeechSynthesisUtterance(aiText.replace(/[🏋️🍽️💧⚡🎯📊💪🌅🍎🥜🌙➕]/g,""));
+                  utt.lang="es-ES"; utt.rate=0.95; utt.pitch=1;
+                  window.speechSynthesis.speak(utt);
+                }} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:20,color:"#4ade80",fontSize:13,padding:"6px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                  ▶ Escuchar
+                </button>;
+              })()}
+            </div>
             <div style={{fontSize:11,color:"rgba(232,245,232,.32)",marginBottom:20}}>{new Date().toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"})}</div>
             {loading
               ?<div style={{textAlign:"center",padding:40}}><div style={{fontSize:32,marginBottom:12}}>⚡</div><div style={{color:"#4ade80",fontSize:13}}>Analizando tu día...</div></div>
-              :<div style={g.fb}>{aiText}</div>}
+              :<div style={g.fb}>
+                {aiText.split("
+").filter(l=>l.trim()).map((line,i)=>(
+                  <p key={i} style={{marginBottom:line.startsWith("🏋️")||line.startsWith("🍽️")||line.startsWith("💧")||line.startsWith("⚡")||line.startsWith("🎯")?12:6,
+                    fontWeight:line.match(/^[🏋️🍽️💧⚡🎯]/u)?700:400,
+                    fontSize:line.match(/^[🏋️🍽️💧⚡🎯]/u)?15:14}}>{line}</p>
+                ))}
+              </div>}
           </div>
         </>}
 
@@ -946,8 +970,9 @@ export default function App() {
               const intercept = yMean - slope*xMean;
               const trendStart = intercept;
               const trendEnd = slope*(n-1)+intercept;
-              const trendStartH = 100-((trendStart-mn)/(mx-mn))*80;
-              const trendEndH = 100-((trendEnd-mn)/(mx-mn))*80;
+              const range = mx - mn;
+              const trendStartH = range > 0 ? 100 - (((trendStart-mn)/range)*80+10) : 50;
+              const trendEndH   = range > 0 ? 100 - (((trendEnd  -mn)/range)*80+10) : 50;
 
               return <div style={{marginBottom:20}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -959,13 +984,14 @@ export default function App() {
                   <div style={{position:"absolute",inset:0,display:"flex",alignItems:"flex-end",gap:2}}>
                     {data.map((e,i)=>{
                       const v=parseFloat(e.today[key1]); if(!v||isNaN(v)) return <div key={i} style={{flex:1}}/>;
-                      const h=100-((v-mn)/(mx-mn))*80;
+                      const range = mx - mn;
+                      const h = range > 0 ? Math.max(6, ((v - mn) / range) * 80 + 10) : 50;
                       const isSelected=tooltip?.i===i;
                       return <div key={i}
                         onClick={()=>setTooltip(tooltip?.i===i?null:{i,v,date:e.date})}
                         style={{flex:1,borderRadius:"2px 2px 0 0",minWidth:0,
-                          height:`${Math.max(6,h)}%`,
-                          background:isSelected?color:`${color}${tooltip?'33':'55'}`,
+                          height:`${h}%`,
+                          background:isSelected?color:`${color}${tooltip?'44':'66'}`,
                           cursor:"pointer",transition:"background .15s",
                           outline:isSelected?`2px solid ${color}`:"none"}}/>;
                     })}
