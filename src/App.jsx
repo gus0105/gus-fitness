@@ -30,7 +30,23 @@ const MEALS = [
   { id: "other",      label: "Otro",         icon: "➕" },
 ];
 
-const COACH_SYSTEM = `Eres el coach personal de Gus, 27 años, 170cm. Objetivo: recomposición corporal (bajar grasa, mantener músculo). Estado actual (mayo 2026): 73.3kg, 20.6% grasa, 54.4kg músculo. Meta: 67.7kg. Progreso: bajó de 77.4kg y 23.8% grasa en 2 meses. Habla en español, tutéalo, sé directo y concreto. Máximo 5 oraciones.`;
+const COACH_SYSTEM = `Eres el coach personal de Gus, hombre de 27 años, 170cm, residente en España.
+Objetivo: recomposición corporal — bajar grasa manteniendo músculo.
+Estado actual (mayo 2026): 73.3kg, 20.6% grasa, 54.4kg músculo. Meta: 67.7kg.
+Progreso: bajó de 77.4kg y 23.8% grasa en 2 meses de trabajo consistente.
+
+IDIOMA: Habla siempre en español de España. Usa "tú" (nunca "vos"). Nada de expresiones argentinas ni latinoamericanas.
+
+FORMATO de respuesta para análisis:
+- Usa secciones cortas con emoji: 🏋️ Entrenamiento, 🍽️ Nutrición, 💧 Hidratación, ⚡ Energía, 🎯 Ajuste para mañana
+- Solo incluye las secciones relevantes según los datos del día
+- Máximo 2-3 líneas por sección
+- Sé directo, concreto y específico con los números
+
+FORMATO de respuesta para chat:
+- Responde en prosa natural, sin secciones
+- Máximo 4-5 oraciones
+- Directo y útil`;
 
 function timeSlot() {
   const h = new Date().getHours();
@@ -877,8 +893,9 @@ export default function App() {
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
           {(()=>{
             const imc = today.imc ? parseFloat(today.imc) : null;
-            const wData = [...entries].filter(e=>e.today?.weight).slice(-30);
-            const gData = [...entries].filter(e=>{
+            const sortedEntries = [...entries].sort((a,b)=>a.date.localeCompare(b.date));
+            const wData = sortedEntries.filter(e=>e.today?.weight).slice(-30);
+            const gData = sortedEntries.filter(e=>{
               if(e.today?.grasa) return true;
               if(e.feedback&&e.feedback.includes("Grasa corporal:")) return true;
               return false;
@@ -888,33 +905,78 @@ export default function App() {
               if(match) return {...e, today:{...e.today, grasa: match[1]}};
               return e;
             });
-            const mData = entries.filter(e=>e.today?.masa_muscular).slice(-30);
+            const mData = sortedEntries.filter(e=>e.today?.masa_muscular).slice(-30);
             const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
             const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
             const totalFat  = today.meals.reduce((s,m)=>s+(m.fat||0),0);
 
             const MiniChart = ({data,key1,color,label,unit,decimals=1})=>{
+              const [tooltip, setTooltip] = useState(null);
               if(data.length<2) return <p style={{color:"rgba(232,245,232,.22)",fontSize:11,textAlign:"center",padding:"10px 0"}}>Pocos datos</p>;
-              const vals = data.map(e=>parseFloat(e.today[key1])).filter(Boolean);
+              const vals = data.map(e=>parseFloat(e.today[key1])).filter(v=>v&&!isNaN(v));
+              if(!vals.length) return null;
               const mn = Math.min(...vals)-0.5; const mx = Math.max(...vals)+0.5;
               const first = vals[0]; const last = vals[vals.length-1];
               const diff = (last-first).toFixed(decimals);
               const diffColor = (key1==="weight"||key1==="grasa") ? (diff<0?"#4ade80":"#f87171") : (diff>0?"#4ade80":"#f87171");
+
+              // Trend line using linear regression
+              const n = vals.length;
+              const xMean = (n-1)/2;
+              const yMean = vals.reduce((s,v)=>s+v,0)/n;
+              const num = vals.reduce((s,v,i)=>s+(i-xMean)*(v-yMean),0);
+              const den = vals.reduce((s,_,i)=>s+(i-xMean)**2,0);
+              const slope = den!==0?num/den:0;
+              const intercept = yMean - slope*xMean;
+              const trendStart = intercept;
+              const trendEnd = slope*(n-1)+intercept;
+              const trendStartH = 100-((trendStart-mn)/(mx-mn))*80;
+              const trendEndH = 100-((trendEnd-mn)/(mx-mn))*80;
+
               return <div style={{marginBottom:20}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                   <div style={g.sec}>{label}</div>
                   <div style={{fontSize:11,color:diffColor,fontWeight:700}}>{diff>0?"+":""}{diff}{unit}</div>
                 </div>
-                <div style={{height:60,display:"flex",alignItems:"flex-end",gap:2}}>
-                  {data.map((e,i)=>{
-                    const v=parseFloat(e.today[key1]); if(!v) return <div key={i} style={{flex:1}}/>;
-                    const h=100-((v-mn)/(mx-mn))*80;
-                    const isLast=i===data.length-1;
-                    return <div key={i} style={{flex:1,borderRadius:"2px 2px 0 0",minWidth:0,height:`${Math.max(6,h)}%`,background:isLast?color:`${color}55`}}/>;
-                  })}
+                <div style={{position:"relative",height:80}}>
+                  {/* Bars */}
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"flex-end",gap:2}}>
+                    {data.map((e,i)=>{
+                      const v=parseFloat(e.today[key1]); if(!v||isNaN(v)) return <div key={i} style={{flex:1}}/>;
+                      const h=100-((v-mn)/(mx-mn))*80;
+                      const isSelected=tooltip?.i===i;
+                      return <div key={i}
+                        onClick={()=>setTooltip(tooltip?.i===i?null:{i,v,date:e.date})}
+                        style={{flex:1,borderRadius:"2px 2px 0 0",minWidth:0,
+                          height:`${Math.max(6,h)}%`,
+                          background:isSelected?color:`${color}${tooltip?'33':'55'}`,
+                          cursor:"pointer",transition:"background .15s",
+                          outline:isSelected?`2px solid ${color}`:"none"}}/>;
+                    })}
+                  </div>
+                  {/* Trend line SVG overlay */}
+                  <svg style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
+                    <line
+                      x1="0%" y1={`${Math.min(95,Math.max(5,trendStartH))}%`}
+                      x2="100%" y2={`${Math.min(95,Math.max(5,trendEndH))}%`}
+                      stroke={color} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6"/>
+                  </svg>
+                  {/* Tooltip */}
+                  {tooltip&&(
+                    <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",
+                      background:"rgba(8,11,15,.95)",border:`1px solid ${color}`,borderRadius:8,
+                      padding:"5px 10px",fontSize:11,color:"#e8f5e8",whiteSpace:"nowrap",zIndex:10,pointerEvents:"none"}}>
+                      <span style={{color:color,fontWeight:700}}>{tooltip.v.toFixed(decimals)}{unit}</span>
+                      <span style={{color:"rgba(232,245,232,.4)",marginLeft:6}}>{tooltip.date?.slice(5)}</span>
+                    </div>
+                  )}
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,alignItems:"center"}}>
                   <span style={{fontSize:9,color:"rgba(232,245,232,.2)"}}>{data[0]?.date?.slice(5)}</span>
+                  <span style={{fontSize:9,color:"rgba(232,245,232,.35)",display:"flex",alignItems:"center",gap:4}}>
+                    <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke={color} strokeWidth="1.5" strokeDasharray="3 2" opacity="0.6"/></svg>
+                    tendencia
+                  </span>
                   <span style={{fontSize:11,fontWeight:700,color:color}}>{last.toFixed(decimals)}{unit}</span>
                 </div>
               </div>;
