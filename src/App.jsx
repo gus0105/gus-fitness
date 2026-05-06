@@ -213,7 +213,7 @@ export default function App() {
         .eq("user_id", userId)
         .order("date", { ascending: true });
       if (!error && data?.length) {
-        const allEntries = data.map(r => ({ date: r.date, today: r.data, feedback: r.feedback }));
+        const allEntries = data.map(r => { let tod = r.data; if (typeof tod === "string") { try { tod = JSON.parse(tod); } catch { tod = EMPTY; } } return { date: r.date, today: tod || EMPTY, feedback: r.feedback }; });
         setEntries(allEntries);
         const td = allEntries.find(e => e.date === currentToday);
         if (td) {
