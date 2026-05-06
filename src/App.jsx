@@ -367,7 +367,7 @@ export default function App() {
     setT({ suppsTaken: updated });
   };
 
-  const estimateKcalFromDesc = async (meal, currentMeals) => {
+  const estimateKcalFromDesc = async (meal) => {
     if (meal.kcal) return; // already has kcal
     try {
       const res = await fetch("/api/coach", {
@@ -404,7 +404,7 @@ export default function App() {
     return Math.round(p * 4 + c * 4 + f * 9);
   };
 
-  const addMeal = () => {
+  const addMeal = async () => {
     if (!mealDesc.trim()) return;
     const meal = { id: Date.now(), slot: mealSlot, desc: mealDesc.trim(), time: nowTime() };
     if (mealProt) meal.prot = parseFloat(mealProt);
@@ -413,11 +413,15 @@ export default function App() {
     if (mealKcal) meal.kcal = parseInt(mealKcal);
     else if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
     const newMeals = [...today.meals, meal];
-    setT({ meals: newMeals });
+    // Save immediately to Supabase - meal is safe even without kcal
+    const newToday = { ...todayRef.current, meals: newMeals };
+    setTodayRaw(newToday);
+    todayRef.current = newToday;
+    await persist(null, newToday); // await ensures it saves before estimating
     setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealKcal(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
-    // Estimate kcal in background if not already set
+    // Then estimate kcal in background - update will also save
     if (!meal.kcal && meal.desc) {
-      setTimeout(() => estimateKcalFromDesc(meal, newMeals), 500);
+      estimateKcalFromDesc(meal);
     }
   };
 
