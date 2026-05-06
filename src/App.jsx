@@ -413,16 +413,15 @@ export default function App() {
     if (mealKcal) meal.kcal = parseInt(mealKcal);
     else if (meal.prot || meal.carb || meal.fat) meal.kcal = estimateKcal(meal);
     const newMeals = [...today.meals, meal];
-    // Save immediately to Supabase - meal is safe even without kcal
     const newToday = { ...todayRef.current, meals: newMeals };
     setTodayRaw(newToday);
     todayRef.current = newToday;
-    await persist(null, newToday); // await ensures it saves before estimating
+    // Navigate immediately - don't wait for Supabase
     setMealDesc(""); setMealProt(""); setMealCarb(""); setMealFat(""); setMealKcal(""); setMealPhoto(null); setPhotoB64(null); setScreen("home");
-    // Then estimate kcal in background - update will also save
-    if (!meal.kcal && meal.desc) {
-      estimateKcalFromDesc(meal);
-    }
+    // Save and estimate in background
+    persist(null, newToday).then(() => {
+      if (!meal.kcal && meal.desc) estimateKcalFromDesc(meal);
+    });
   };
 
   const addDrink = () => {
