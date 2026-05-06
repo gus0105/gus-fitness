@@ -48,6 +48,26 @@ FORMATO de respuesta para chat:
 - Máximo 4-5 oraciones
 - Directo y útil`;
 
+
+const MUSCLE_GROUPS = [
+  { id:"pecho",       label:"Pecho",       abbr:"PE", cat:"empuje",  color:"#38bdf8" },
+  { id:"hombros",     label:"Hombros",     abbr:"HO", cat:"empuje",  color:"#38bdf8" },
+  { id:"triceps",     label:"Tríceps",     abbr:"TR", cat:"empuje",  color:"#38bdf8" },
+  { id:"espalda",     label:"Espalda",     abbr:"ES", cat:"tiron",   color:"#4ade80" },
+  { id:"biceps",      label:"Bíceps",      abbr:"BI", cat:"tiron",   color:"#4ade80" },
+  { id:"antebrazos",  label:"Antebrazos",  abbr:"AF", cat:"tiron",   color:"#4ade80" },
+  { id:"cuadriceps",  label:"Cuádriceps",  abbr:"CU", cat:"piernas", color:"#fb923c" },
+  { id:"isquios",     label:"Isquios",     abbr:"IS", cat:"piernas", color:"#fb923c" },
+  { id:"gluteos",     label:"Glúteos",     abbr:"GL", cat:"piernas", color:"#fb923c" },
+  { id:"gemelos",     label:"Gemelos",     abbr:"GE", cat:"piernas", color:"#fb923c" },
+  { id:"abdominales", label:"Abdominales", abbr:"AB", cat:"core",    color:"#a78bfa" },
+  { id:"lumbar",      label:"Lumbar",      abbr:"LU", cat:"core",    color:"#a78bfa" },
+  { id:"cardio",      label:"Cardio",      abbr:"🏃", cat:"core",    color:"#a78bfa" },
+  { id:"descanso",    label:"Descanso",    abbr:"😴", cat:"core",    color:"#a78bfa" },
+];
+
+const CAT_LABELS = { empuje:"Empuje", tiron:"Tirón", piernas:"Piernas", core:"Core y otros" };
+
 function timeSlot() {
   const h = new Date().getHours();
   if (h < 10) return "breakfast";
@@ -61,7 +81,7 @@ function nowTime() {
   return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
-const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", suppsTaken: [], kcal: 0 };
+const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], suppsTaken: [], kcal: 0 };
 
 async function callClaude(userPrompt) {
   const response = await fetch("/api/coach", {
@@ -476,7 +496,11 @@ export default function App() {
     const drinkTxt = today.drinks.length
       ? today.drinks.map(d => `- ${DRINKS.find(x => x.id === d.type)?.label}: ${d.amount}${d.unit}`).join("\n")
       : "Sin bebidas";
-    return { mealTxt, drinkTxt };
+    const muscleGroups = today.muscleGroups||[];
+    const muscleTxt = muscleGroups.length
+      ? muscleGroups.map(id=>MUSCLE_GROUPS.find(m=>m.id===id)?.label||id).join(", ")
+      : today.training || "ninguno";
+    return { mealTxt, drinkTxt, muscleTxt };
   };
 
   const saveAnalysis = async (text, type, newAnalyses) => {
@@ -499,9 +523,9 @@ export default function App() {
 
   const analyzeNow = async () => {
     setLoading(true); setAiText(""); setScreen("result");
-    const { mealTxt, drinkTxt } = buildContext();
+    const { mealTxt, drinkTxt, muscleTxt } = buildContext();
     const totalKcalNow = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${todayRef.current.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -517,9 +541,9 @@ export default function App() {
 
   const analyzeDay = async () => {
     setLoading(true); setAiText(""); setScreen("result");
-    const { mealTxt, drinkTxt } = buildContext();
+    const { mealTxt, drinkTxt, muscleTxt } = buildContext();
     const totalKcalDay = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}${todayRef.current.imc ? " | IMC: "+todayRef.current.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${todayRef.current.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}${todayRef.current.imc ? " | IMC: "+todayRef.current.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -694,8 +718,34 @@ export default function App() {
           </div>
 
           <div style={g.card}>
-            <div style={g.sec}>💪 Entrenamiento</div>
-            <input style={{...g.inp,marginBottom:0}} placeholder="ej: pecho y tríceps 45min. O: descanso"
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={g.sec}>💪 Entrenamiento</div>
+              {(today.muscleGroups||[]).length>0&&<span style={{fontSize:10,color:"rgba(74,222,128,.6)"}}>{(today.muscleGroups||[]).length} grupos</span>}
+            </div>
+            {["empuje","tiron","piernas","core"].map(cat=>(
+              <div key={cat} style={{marginBottom:12}}>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",color:"rgba(232,245,232,.3)",marginBottom:7}}>{CAT_LABELS[cat]}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {MUSCLE_GROUPS.filter(m=>m.cat===cat).map(m=>{
+                    const active=(today.muscleGroups||[]).includes(m.id);
+                    return <div key={m.id} onClick={()=>{
+                      const cur=today.muscleGroups||[];
+                      const next=active?cur.filter(x=>x!==m.id):[...cur,m.id];
+                      setT({muscleGroups:next});
+                    }} style={{
+                      display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:20,cursor:"pointer",
+                      border:`1.5px solid ${active?m.color:m.color+"44"}`,
+                      background:active?`${m.color}18`:"rgba(255,255,255,.03)",
+                      opacity:active?1:0.55,transition:"all .2s"
+                    }}>
+                      <div style={{width:24,height:24,borderRadius:"50%",background:active?`${m.color}33`:"rgba(255,255,255,.06)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:m.abbr.length>2?14:10,fontWeight:800,color:m.color,flexShrink:0}}>{m.abbr}</div>
+                      <span style={{fontSize:12,fontWeight:600,color:active?m.color:"rgba(232,245,232,.55)"}}>{m.label}</span>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            ))}
+            <input style={{...g.inp,marginBottom:0,marginTop:4,fontSize:12}} placeholder="Notas adicionales (series, peso...)"
               value={today.training}
               onChange={e=>{ const v=e.target.value; setTodayRaw(p=>({...p,training:v})); todayRef.current={...todayRef.current,training:v}; }}
               onBlur={e=>persist(null,{...todayRef.current,training:e.target.value})}/>
