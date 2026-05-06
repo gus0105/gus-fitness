@@ -251,11 +251,22 @@ export default function App() {
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  // Reload data when app comes back to foreground (handles day change)
+  // Reload when app comes to foreground, force-save when going to background
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "visible" && userRef.current?.id) {
         loadData(userRef.current.id);
+      } else if (document.visibilityState === "hidden" && userRef.current?.id) {
+        // Force save current state when app goes to background
+        const t = todayRef.current;
+        if (t && (t.weight || t.meals?.length || t.drinks?.length || t.training)) {
+          supabase.from("entries").upsert({
+            user_id: userRef.current.id,
+            date: getTodayStr(),
+            data: t,
+            feedback: t.feedback ?? null,
+          }, { onConflict: "user_id,date" }).catch(() => {});
+        }
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -459,33 +470,39 @@ export default function App() {
   };
 
   const analyzeNow = async () => {
-    setLoading(true); setScreen("result");
+    setLoading(true); setAiText(""); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const totalKcalNow = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
+    const totalKcalNow = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${todayRef.current.training || "ninguno"}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
       const newAnalyses = [...analyses, { time: nowTime(), text, type: "quick" }];
       setAnalyses(newAnalyses);
-      await saveAnalysis(text, "quick", newAnalyses);
-    } catch (e) { setAiText("Error: " + e.message); }
-    setLoading(false);
+      saveAnalysis(text, "quick", newAnalyses); // no await - don't block UI
+    } catch (e) {
+      setAiText("Error al conectar con el coach: " + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const analyzeDay = async () => {
-    setLoading(true); setScreen("result");
+    setLoading(true); setAiText(""); setScreen("result");
     const { mealTxt, drinkTxt } = buildContext();
-    const totalKcalDay = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${today.weight || "no registrado"}kg${today.grasa ? " | Grasa: "+today.grasa+"%" : ""}${today.imc ? " | IMC: "+today.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${today.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
+    const totalKcalDay = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}${todayRef.current.imc ? " | IMC: "+todayRef.current.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nENTRENAMIENTO: ${todayRef.current.training || "ninguno"}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
       const newAnalyses = [...analyses, { time: nowTime(), text, type: "summary" }];
       setAnalyses(newAnalyses);
-      await saveAnalysis(text, "summary", newAnalyses);
-    } catch (e) { setAiText("Error: " + e.message); }
-    setLoading(false);
+      saveAnalysis(text, "summary", newAnalyses); // no await
+    } catch (e) {
+      setAiText("Error al conectar con el coach: " + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const sendChat = async () => {
@@ -647,7 +664,9 @@ export default function App() {
           <div style={g.card}>
             <div style={g.sec}>💪 Entrenamiento</div>
             <input style={{...g.inp,marginBottom:0}} placeholder="ej: pecho y tríceps 45min. O: descanso"
-              value={today.training} onChange={e=>setT({training:e.target.value})}/>
+              value={today.training}
+              onChange={e=>{ const v=e.target.value; setTodayRaw(p=>({...p,training:v})); todayRef.current={...todayRef.current,training:v}; }}
+              onBlur={e=>persist(null,{...todayRef.current,training:e.target.value})}/>
           </div>
 
           {(()=>{
