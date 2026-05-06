@@ -189,7 +189,7 @@ export default function App() {
   };
 
   const loadData = async (userId) => {
-    const currentToday = getTodayStr();
+    const currentToday = getTodayStr(); // always fresh date
     try {
       const { data, error } = await supabase
         .from("entries")
@@ -251,6 +251,17 @@ export default function App() {
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
+  // Reload data when app comes back to foreground (handles day change)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && userRef.current?.id) {
+        loadData(userRef.current.id);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
     const TIMES = ["08:00", "16:00", "21:00"];
@@ -284,14 +295,18 @@ export default function App() {
   const persist = async (newEntries, newToday) => {
     try {
       const t = newToday ?? todayRef.current;
+      const currentDate = getTodayStr(); // always recalculate
+      if (!userRef.current?.id) return; // don't save if not logged in
       await supabase.from("entries").upsert({
-        user_id: userRef.current?.id || "gus",
-        date: todayStr,
+        user_id: userRef.current.id,
+        date: currentDate,
         data: t,
         feedback: t.feedback ?? null,
       }, { onConflict: "user_id,date" });
       if (newEntries) setEntries(newEntries);
-    } catch {}
+    } catch (e) {
+      console.error("persist error:", e);
+    }
   };
 
   const setT = (patch) => {
@@ -377,7 +392,7 @@ export default function App() {
         const updatedToday = { ...todayRef.current, meals: updatedMeals };
         setTodayRaw(updatedToday);
         todayRef.current = updatedToday;
-        persist(null, updatedToday);
+        persist(null, updatedToday); // persist uses getTodayStr() internally
       }
     } catch {}
   };
@@ -430,7 +445,7 @@ export default function App() {
       || newAnalyses[newAnalyses.length - 1]?.text || text;
     try {
       await supabase.from("entries").upsert({
-        user_id: userRef.current?.id || "gus", date: todayStr,
+        user_id: userRef.current?.id || "gus", date: getTodayStr(),
         data: updatedToday,
         feedback: lastFeedback,
       }, { onConflict: "user_id,date" });
