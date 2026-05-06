@@ -902,8 +902,7 @@ export default function App() {
             {loading
               ?<div style={{textAlign:"center",padding:40}}><div style={{fontSize:32,marginBottom:12}}>⚡</div><div style={{color:"#4ade80",fontSize:13}}>Analizando tu día...</div></div>
               :<div style={g.fb}>
-                {aiText.split("
-").filter(l=>l.trim()).map((line,i)=>(
+                {aiText.split("\n").filter(l=>l.trim()).map((line,i)=>(
                   <p key={i} style={{marginBottom:line.startsWith("🏋️")||line.startsWith("🍽️")||line.startsWith("💧")||line.startsWith("⚡")||line.startsWith("🎯")?12:6,
                     fontWeight:line.match(/^[🏋️🍽️💧⚡🎯]/u)?700:400,
                     fontSize:line.match(/^[🏋️🍽️💧⚡🎯]/u)?15:14}}>{line}</p>
