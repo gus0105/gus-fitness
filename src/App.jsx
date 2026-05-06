@@ -892,6 +892,9 @@ export default function App() {
                   if(window.speechSynthesis.speaking){ window.speechSynthesis.cancel(); return; }
                   const utt = new SpeechSynthesisUtterance(aiText.replace(/[🏋️🍽️💧⚡🎯📊💪🌅🍎🥜🌙➕]/g,""));
                   utt.lang="es-ES"; utt.rate=0.95; utt.pitch=1;
+                  const voices = window.speechSynthesis.getVoices();
+                  const esVoice = voices.find(v=>v.lang==="es-ES") || voices.find(v=>v.lang.startsWith("es"));
+                  if(esVoice) utt.voice = esVoice;
                   window.speechSynthesis.speak(utt);
                 }} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:20,color:"#4ade80",fontSize:13,padding:"6px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
                   ▶ Escuchar
