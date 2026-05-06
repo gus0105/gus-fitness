@@ -142,6 +142,8 @@ export default function App() {
   const [ready, setReady]         = useState(false);
   const [user, setUser]           = useState(null);
   const [analyses, setAnalyses]   = useState([]);
+  const [saving, setSaving]       = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [calYear, setCalYear]     = useState(new Date().getFullYear());
   const [calMonth, setCalMonth]   = useState(new Date().getMonth());
   const [selDay, setSelDay]       = useState(null);
@@ -320,20 +322,30 @@ export default function App() {
   userRef.current = user;
 
   const persist = async (newEntries, newToday) => {
-    try {
-      const t = newToday ?? todayRef.current;
-      const currentDate = getTodayStr(); // always recalculate
-      if (!userRef.current?.id) return; // don't save if not logged in
-      await supabase.from("entries").upsert({
-        user_id: userRef.current.id,
-        date: currentDate,
-        data: t,
-        feedback: t.feedback ?? null,
-      }, { onConflict: "user_id,date" });
-      if (newEntries) setEntries(newEntries);
-    } catch (e) {
-      console.error("persist error:", e);
+    if (!userRef.current?.id) return;
+    const t = newToday ?? todayRef.current;
+    const currentDate = getTodayStr();
+    setSaving(true); setSaveError(false);
+    let success = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { error } = await supabase.from("entries").upsert({
+          user_id: userRef.current.id,
+          date: currentDate,
+          data: t,
+          feedback: t.feedback ?? null,
+        }, { onConflict: "user_id,date" });
+        if (!error) { success = true; break; }
+        console.error("persist attempt", attempt+1, error);
+      } catch (e) {
+        console.error("persist error attempt", attempt+1, e);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt+1)));
+      }
     }
+    setSaving(false);
+    setSaveError(!success);
+    if (success && newEntries) setEntries(newEntries);
+    return success;
   };
 
   const setT = (patch) => {
@@ -626,7 +638,11 @@ export default function App() {
       <div style={g.wrap}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
-          <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {saving&&<span style={{fontSize:10,color:"rgba(74,222,128,.5)"}}>💾 Guardando...</span>}
+            {saveError&&<span style={{fontSize:10,color:"#f87171"}}>⚠️ Error al guardar</span>}
+            <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
+          </div>
         </div>
 
         {screen==="home" && <>
