@@ -225,13 +225,21 @@ export default function App() {
     setWInput(""); setGInput(""); setImcInput("");
   };
 
+  const loadingRef = useRef(false);
+
   const loadData = async (userId) => {
+    if (loadingRef.current) return; // prevent concurrent loads
+    loadingRef.current = true;
     const currentToday = getTodayStr();
     try {
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const fromDate = ninetyDaysAgo.toISOString().split("T")[0];
       const { data, error } = await supabase
         .from("entries")
         .select("*")
         .eq("user_id", userId)
+        .gte("date", fromDate)
         .order("date", { ascending: true });
       if (!error && data) {
         const allEntries = data.map(r => {
@@ -262,12 +270,13 @@ export default function App() {
     } catch (e) {
       console.error("loadData error:", e);
     }
+    loadingRef.current = false;
     setReady(true); // always ensure app is unblocked after loadData
   };
 
   useEffect(() => {
     // Fallback: never stay on loading more than 8 seconds
-    const timeout = setTimeout(() => setReady(true), 8000);
+    const timeout = setTimeout(() => { loadingRef.current = false; setReady(true); }, 5000);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -283,10 +292,10 @@ export default function App() {
       }
     })();
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
+      if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
         setUser(session.user);
-        await loadData(session.user.id);
-      } else {
+        if (!userRef.current) await loadData(session.user.id); // only if not already loaded
+      } else if (!session) {
         setUser(null);
         setEntries([]);
         setTodayRaw(EMPTY);
