@@ -227,6 +227,30 @@ export default function App() {
 
   const loadingRef = useRef(false);
 
+  // Load cached data instantly on mount
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem("gus_cache");
+      if (cached) {
+        const { entries: cachedEntries, ts } = JSON.parse(cached);
+        const ageHours = (Date.now() - ts) / 3600000;
+        if (ageHours < 24 && cachedEntries?.length) {
+          setEntries(cachedEntries);
+          const currentToday = getTodayStr();
+          const td = cachedEntries.find(e => e.date === currentToday);
+          if (td) {
+            setTodayRaw(td.today);
+            todayRef.current = td.today;
+            setWInput(td.today.weight || "");
+            setGInput(td.today.grasa || "");
+            setImcInput(td.today.imc || "");
+            if (td.today?.analyses?.length) setAnalyses(td.today.analyses);
+          }
+        }
+      }
+    } catch {}
+  }, []);
+
   const loadData = async (userId) => {
     if (loadingRef.current) return; // prevent concurrent loads
     loadingRef.current = true;
@@ -247,6 +271,8 @@ export default function App() {
           if (typeof tod === "string") { try { tod = JSON.parse(tod); } catch { tod = EMPTY; } }
           return { date: r.date, today: tod || EMPTY, feedback: r.feedback };
         });
+        // Cache in localStorage for instant load next time
+        try { localStorage.setItem("gus_cache", JSON.stringify({ entries: allEntries, ts: Date.now() })); } catch {}
         setEntries(allEntries);
         const td = allEntries.find(e => e.date === currentToday);
         if (td) {
@@ -292,9 +318,10 @@ export default function App() {
       }
     })();
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+      if (session?.user) {
         setUser(session.user);
-        if (!userRef.current) await loadData(session.user.id); // only if not already loaded
+        userRef.current = session.user;
+        if (event === "SIGNED_IN" || event === "INITIAL_SESSION") await loadData(session.user.id);
       } else if (!session) {
         setUser(null);
         setEntries([]);
@@ -642,7 +669,7 @@ export default function App() {
     </>;
   };
 
-  if (!ready) return (
+  if (!ready && !user) return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209)", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Cargando...</div></div>
     </div>
