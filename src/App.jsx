@@ -641,7 +641,7 @@ export default function App() {
     rm:       { background:"none", border:"none", color:"rgba(232,245,232,.18)", fontSize:18, cursor:"pointer", flexShrink:0 },
     fb:       { background:"rgba(74,222,128,.05)", border:"1px solid rgba(74,222,128,.18)", borderRadius:14, padding:18, marginBottom:16, fontSize:14, lineHeight:1.75, color:"#d1fae5" },
     chart:    { height:68, display:"flex", alignItems:"flex-end", gap:3 },
-    bar:      (h,t) => ({ flex:1, borderRadius:"3px 3px 0 0", minWidth:0, height:`${Math.max(8,h)}%`, background: t?"linear-gradient(180deg,#4ade80,#22c55e)":"rgba(74,222,128,.2)" }),
+    bar:      (h,t) => ({ flex:1, borderRadius:"3px 3px 0 0", minWidth:0, height:`${h}%`, background: t?"linear-gradient(180deg,#4ade80,#22c55e)":"rgba(74,222,128,.35)", transition:"height .3s ease" }),
     nav:      { position:"fixed", bottom:0, left:0, right:0, background:"rgba(8,11,15,.97)", borderTop:"1px solid rgba(255,255,255,.07)", display:"flex", justifyContent:"space-around", padding:"10px 0 18px", zIndex:100 },
     nb:       (a) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:2, background:"none", border:"none", color: a?"#4ade80":"rgba(232,245,232,.28)", cursor:"pointer", padding:"3px 16px", fontSize:9, fontWeight:600 }),
     chatWrap: { display:"flex", flexDirection:"column", height:"calc(100vh - 110px)" },
@@ -653,14 +653,28 @@ export default function App() {
   };
 
   const Chart = () => {
+    const [tip, setTip] = useState(null);
     if (wVals.length < 2) return <p style={{ color:"rgba(232,245,232,.22)", fontSize:12, textAlign:"center", padding:"12px 0" }}>Registra al menos 2 días</p>;
+    const range = wMax - wMin;
     return <>
-      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
         <span style={{ fontSize:9, color:"rgba(232,245,232,.22)" }}>{wMax.toFixed(1)}kg</span>
-        <span style={{ fontSize:9, color:"rgba(232,245,232,.22)" }}>{wMin.toFixed(1)}kg</span>
+        {tip
+          ? <span style={{ fontSize:11, fontWeight:700, color:"#4ade80" }}>{tip.w}kg <span style={{ fontSize:9, color:"rgba(232,245,232,.35)", fontWeight:400 }}>{tip.date?.slice(5)}</span></span>
+          : <span style={{ fontSize:9, color:"rgba(232,245,232,.22)" }}>{wMin.toFixed(1)}kg</span>
+        }
       </div>
       <div style={g.chart}>
-        {wHistory.map((e,i) => { const w=parseFloat(e.today?.weight); if(!w) return <div key={i} style={{flex:1}}/>; const h=100-((w-wMin)/(wMax-wMin))*80; return <div key={i} style={g.bar(h,e.date===todayStr)} title={`${w}kg`}/>; })}
+        {wHistory.map((e,i) => {
+          const w = parseFloat(e.today?.weight);
+          if (!w) return <div key={i} style={{flex:1}}/>;
+          const h = range > 0 ? Math.max(8, ((w-wMin)/range)*80+10) : 50;
+          const isToday = e.date === todayStr;
+          const isTip = tip?.i === i;
+          return <div key={i}
+            onClick={() => setTip(isTip ? null : {i, w, date: e.date})}
+            style={{...g.bar(h, isToday), cursor:"pointer", opacity: tip && !isTip ? 0.5 : 1, outline: isTip ? "2px solid #4ade80" : "none", outlineOffset:"1px"}}/>;
+        })}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", marginTop:4 }}>
         <span style={{ fontSize:9, color:"rgba(232,245,232,.2)" }}>{wHistory[0]?.date?.slice(5)}</span>
