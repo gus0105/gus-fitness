@@ -656,6 +656,17 @@ export default function App() {
     const [tip, setTip] = useState(null);
     if (wVals.length < 2) return <p style={{ color:"rgba(232,245,232,.22)", fontSize:12, textAlign:"center", padding:"12px 0" }}>Registra al menos 2 días</p>;
     const range = wMax - wMin;
+
+    // Build full 14-day range including empty days
+    const fullDays = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const entry = entries.find(e => e.date === dateStr);
+      const w = entry?.today?.weight ? parseFloat(entry.today.weight) : null;
+      fullDays.push({ dateStr, w });
+    }
+
     return <>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
         <span style={{ fontSize:9, color:"rgba(232,245,232,.22)" }}>{wMax.toFixed(1)}kg</span>
@@ -665,19 +676,28 @@ export default function App() {
         }
       </div>
       <div style={g.chart}>
-        {wHistory.map((e,i) => {
-          const w = parseFloat(e.today?.weight);
-          if (!w) return <div key={i} style={{flex:1}}/>;
-          const h = range > 0 ? Math.max(8, ((w-wMin)/range)*80+10) : 50;
-          const isToday = e.date === todayStr;
+        {fullDays.map((day, i) => {
+          const isToday = day.dateStr === todayStr;
           const isTip = tip?.i === i;
+          if (!day.w) {
+            // Empty day - show dotted placeholder bar at minimum height
+            return <div key={i} style={{
+              flex:1, borderRadius:"3px 3px 0 0", minWidth:0, height:"12%",
+              border:"1px dashed rgba(74,222,128,.2)", background:"transparent",
+              alignSelf:"flex-end"
+            }}/>;
+          }
+          const h = range > 0 ? Math.max(8, ((day.w - wMin)/range)*80+10) : 50;
           return <div key={i}
-            onClick={() => setTip(isTip ? null : {i, w, date: e.date})}
-            style={{...g.bar(h, isToday), cursor:"pointer", opacity: tip && !isTip ? 0.5 : 1, outline: isTip ? "2px solid #4ade80" : "none", outlineOffset:"1px"}}/>;
+            onClick={() => setTip(isTip ? null : {i, w: day.w, date: day.dateStr})}
+            style={{...g.bar(h, isToday), cursor:"pointer",
+              opacity: tip && !isTip ? 0.5 : 1,
+              outline: isTip ? "2px solid #4ade80" : "none",
+              outlineOffset:"1px"}}/>;
         })}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", marginTop:4 }}>
-        <span style={{ fontSize:9, color:"rgba(232,245,232,.2)" }}>{wHistory[0]?.date?.slice(5)}</span>
+        <span style={{ fontSize:9, color:"rgba(232,245,232,.2)" }}>{fullDays[0]?.dateStr?.slice(5)}</span>
         <span style={{ fontSize:9, color:"#4ade80" }}>hoy</span>
       </div>
     </>;
