@@ -241,7 +241,7 @@ export default function App() {
       if (cached) {
         const { entries: cachedEntries, ts } = JSON.parse(cached);
         const ageHours = (Date.now() - ts) / 3600000;
-        if (ageHours < 24 && cachedEntries?.length) {
+        if (ageHours < 168 && cachedEntries?.length) { // 7 days cache
           setEntries(cachedEntries);
           const currentToday = getTodayStr();
           const td = cachedEntries.find(e => e.date === currentToday);
@@ -364,18 +364,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
-    const TIMES = ["08:00", "16:00", "21:00"];
-    const register = async () => {
-      try {
-        const reg = await navigator.serviceWorker.register("/sw.js");
-        await navigator.serviceWorker.ready;
-        if (Notification.permission === "granted") {
-          reg.active?.postMessage({ type: "SCHEDULE_NOTIFICATIONS", times: TIMES });
-        }
-      } catch {}
-    };
-    register();
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
 
   const requestNotifications = async () => {
@@ -393,23 +383,60 @@ export default function App() {
   const userRef = useRef(user);
   userRef.current = user;
 
+  const pendingSaveRef = useRef(null);
+
   const persist = async (newEntries, newToday) => {
-    if (!userRef.current?.id) return;
     const t = newToday ?? todayRef.current;
     const currentDate = getTodayStr();
+    const userId = userRef.current?.id;
+
+    if (!userId) {
+      // Queue the save for when user is available
+      pendingSaveRef.current = { t, currentDate };
+      return;
+    }
+
     try {
       const { error } = await supabase.from("entries").upsert({
-        user_id: userRef.current.id,
+        user_id: userId,
         date: currentDate,
         data: t,
         feedback: t.feedback ?? null,
       }, { onConflict: "user_id,date" });
       if (error) console.error("persist error:", error);
+      else pendingSaveRef.current = null; // clear pending
       if (newEntries) setEntries(newEntries);
+      // Also update cache
+      try {
+        const cached = localStorage.getItem("gus_cache");
+        if (cached) {
+          const p = JSON.parse(cached);
+          const updated = (p.entries || []).filter(e => e.date !== currentDate);
+          updated.push({ date: currentDate, today: t, feedback: t.feedback });
+          updated.sort((a,b) => a.date.localeCompare(b.date));
+          localStorage.setItem("gus_cache", JSON.stringify({ entries: updated, ts: Date.now() }));
+        }
+      } catch {}
     } catch (e) {
       console.error("persist catch:", e);
+      pendingSaveRef.current = { t, currentDate };
     }
   };
+
+  // Flush pending saves when user becomes available
+  useEffect(() => {
+    if (user?.id && pendingSaveRef.current) {
+      const { t, currentDate } = pendingSaveRef.current;
+      supabase.from("entries").upsert({
+        user_id: user.id,
+        date: currentDate,
+        data: t,
+        feedback: t.feedback ?? null,
+      }, { onConflict: "user_id,date" }).then(() => {
+        pendingSaveRef.current = null;
+      }).catch(() => {});
+    }
+  }, [user]);
 
   const setT = (patch) => {
     const updated = { ...todayRef.current, ...patch };
@@ -712,7 +739,7 @@ export default function App() {
 
   if (!ready && !user) return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209)", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Cargando...</div></div>
+      <div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Conectando...</div></div>
     </div>
   );
 
