@@ -222,7 +222,10 @@ export default function App() {
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin }
+      options: {
+        redirectTo: window.location.origin,
+        skipBrowserRedirect: false,
+      }
     });
   };
 
@@ -235,6 +238,22 @@ export default function App() {
   };
 
   const loadingRef = useRef(false);
+
+  // Handle OAuth redirect hash (Safari PWA fix)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          setUser(session.user);
+          userRef.current = session.user;
+          // Clean URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+          loadData(session.user.id);
+        }
+      });
+    }
+  }, []);
 
   // Load cached data instantly on mount
   useEffect(() => {
