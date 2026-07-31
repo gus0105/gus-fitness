@@ -723,7 +723,7 @@ export default function App() {
   const hasAlc = today.drinks.some(d => ["beer","wine","spirits"].includes(d.type));
 
   const g = {
-    page:     { minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
+    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
     wrap:     { maxWidth:440, margin:"0 auto", padding:"0 18px 90px" },
     hdr:      { padding:"28px 0 16px", display:"flex", justifyContent:"space-between", alignItems:"center" },
     logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:"#4ade80" },
@@ -748,7 +748,7 @@ export default function App() {
     bar:      (h,t) => ({ flex:1, borderRadius:"3px 3px 0 0", minWidth:0, height:`${h}%`, background: t?"linear-gradient(180deg,#4ade80,#22c55e)":"rgba(74,222,128,.35)", transition:"height .3s ease" }),
     nav:      { position:"fixed", bottom:0, left:0, right:0, background:"rgba(8,11,15,.97)", borderTop:"1px solid rgba(255,255,255,.07)", display:"flex", justifyContent:"space-around", padding:"10px 0 18px", zIndex:100 },
     nb:       (a) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:2, background:"none", border:"none", color: a?"#4ade80":"rgba(232,245,232,.28)", cursor:"pointer", padding:"3px 16px", fontSize:9, fontWeight:600 }),
-    chatWrap: { display:"flex", flexDirection:"column", height:"calc(100vh - 110px)" },
+    chatWrap: { display:"flex", flexDirection:"column", height:"calc(100vh - 110px)", height:"calc(-webkit-fill-available - 110px)" },
     chatScr:  { flex:1, overflowY:"auto", display:"flex", flexDirection:"column", paddingBottom:6 },
     bub:      (u) => ({ maxWidth:"85%", padding:"11px 15px", marginBottom:8, fontSize:13, lineHeight:1.65, borderRadius: u?"16px 16px 3px 16px":"16px 16px 16px 3px", background: u?"linear-gradient(135deg,#4ade80,#22c55e)":"rgba(255,255,255,.06)", color: u?"#080b0f":"#e8f5e8", border: u?"none":"1px solid rgba(255,255,255,.08)", alignSelf: u?"flex-end":"flex-start" }),
     chatRow:  { display:"flex", gap:8, paddingTop:10, borderTop:"1px solid rgba(255,255,255,.07)" },
@@ -814,7 +814,7 @@ export default function App() {
   );
 
   if (!user) return (
-    <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
+    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
       <div style={{ maxWidth:360, width:"100%", padding:"0 24px", textAlign:"center" }}>
         <div style={{ fontSize:64, marginBottom:16 }}>💪</div>
