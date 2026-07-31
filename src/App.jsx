@@ -386,8 +386,26 @@ export default function App() {
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
-  }, []);
+    navigator.serviceWorker.register("/sw.js").then(async () => {
+      const reg = await navigator.serviceWorker.ready;
+      // Schedule local notifications as fallback
+      if (Notification.permission === "granted") {
+        const slots = buildNotifSlots(notifConfig);
+        reg.active?.postMessage({ type: "SCHEDULE_LOCAL", slots });
+      }
+    }).catch(() => {});
+  }, [notifConfig]);
+
+  const buildNotifSlots = (config) => {
+    const slots = [];
+    if (config.meals?.enabled) {
+      config.meals.times.forEach(t => slots.push({ time: t, title: "Gus Coach 🍽️", body: "¿Has registrado tu comida?" }));
+    }
+    if (config.weight?.enabled && config.weight.time) slots.push({ time: config.weight.time, title: "Gus Coach ⚖️", body: "¿Te has pesado hoy?" });
+    if (config.supplements?.enabled && config.supplements.time) slots.push({ time: config.supplements.time, title: "Gus Coach 💊", body: "¿Has tomado tus suplementos?" });
+    if (config.motivational?.enabled && config.motivational.time) slots.push({ time: config.motivational.time, title: "Gus Coach 🎯", body: "¡Sigue así! Cada día cuenta. 💪" });
+    return slots;
+  };
 
   const requestNotifications = async () => {
     if (!("Notification" in window)) { alert("Tu navegador no soporta notificaciones."); return; }
