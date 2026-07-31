@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+const VAPID_PUBLIC_KEY = "BFwI7qyDop2L5b_qWzhUkN11v9QGwnyKHHSZ0nePV476l63-No51_f0A-J7hBRY-XNV2z4dzp_4Nw7Pmk2XZzEE";
+
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
