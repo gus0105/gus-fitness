@@ -364,37 +364,23 @@ export default function App() {
   }, []);
 
   const subscribeToPush = async (userId) => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      alert("Tu navegador no soporta notificaciones push.");
-      return false;
-    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     try {
       const reg = await navigator.serviceWorker.ready;
-      // Unsubscribe first to force fresh subscription
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) await existing.unsubscribe();
-      // Subscribe fresh
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-      });
-      const res = await fetch("/api/push", {
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }
+      await fetch("/api/push", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "subscribe", subscription: sub, user_id: userId })
       });
-      const data = await res.json();
-      if (data.ok) {
-        alert("✅ Notificaciones push activadas correctamente.");
-        return true;
-      } else {
-        alert("Error al guardar suscripción: " + data.error);
-        return false;
-      }
     } catch (e) {
       console.error("Push subscription error:", e);
-      alert("Error: " + e.message);
-      return false;
     }
   };
 
@@ -1004,11 +990,10 @@ export default function App() {
                   if(Notification.permission==="granted") {
                     if(userRef.current?.id) await subscribeToPush(userRef.current.id);
                   } else {
-                    const perm = await Notification.requestPermission();
-                    if(perm==="granted" && userRef.current?.id) await subscribeToPush(userRef.current.id);
+                    await requestNotifications();
                   }
                 }} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
-                  {Notification.permission==="granted"?"🔄 Reactivar push":"🔔 Activar"}
+                  {Notification.permission==="granted"?"✅ Activas":"Activar"}
                 </button>
               )}
             </div>
