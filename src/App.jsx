@@ -198,6 +198,7 @@ export default function App() {
   const [calMonth, setCalMonth]   = useState(new Date().getMonth());
   const [selDay, setSelDay]       = useState(null);
   const [expandedMonths, setExpandedMonths] = useState({});
+  const [activeTip, setActiveTip] = useState(null);
   const [editingMealId, setEditingMealId] = useState(null);
   const [editingMealTime, setEditingMealTime] = useState("");
   const [supplements, setSupplements] = useState([
@@ -1046,8 +1047,6 @@ export default function App() {
             const pct = Math.min(100, Math.round((totalKcal/kcalGoal)*100));
             const mealsWithKcal = today.meals.filter(m=>m.kcal>0);
             const SLOT_COLORS = { breakfast:"#fb923c", morning_snack:"#fbbf24", lunch:"#4ade80", afternoon_snack:"#38bdf8", dinner:"#a78bfa", other:"#94a3b8" };
-            const [activeTip, setActiveTip] = useState(null);
-
             return totalKcal>0||kcalGoal>0 ? (
               <div style={g.card}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
