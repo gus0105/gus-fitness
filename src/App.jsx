@@ -144,6 +144,35 @@ function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
   );
 }
 
+
+const BADGES = [
+  { id:"streak7",   days:7,   icon:"🔥", label:"Una semana",     desc:"7 días seguidos registrando" },
+  { id:"streak14",  days:14,  icon:"⚡", label:"Dos semanas",    desc:"14 días seguidos registrando" },
+  { id:"streak30",  days:30,  icon:"💪", label:"Un mes",         desc:"30 días seguidos registrando" },
+  { id:"streak60",  days:60,  icon:"🏆", label:"Dos meses",      desc:"60 días seguidos registrando" },
+  { id:"streak100", days:100, icon:"👑", label:"100 días",       desc:"100 días seguidos registrando" },
+];
+
+function calcStreak(entries) {
+  if (!entries?.length) return 0;
+  const sorted = [...entries].sort((a,b) => b.date.localeCompare(a.date));
+  const today = new Date().toISOString().split("T")[0];
+  let streak = 0;
+  let current = today;
+  for (const e of sorted) {
+    const hasData = e.today?.weight || e.today?.meals?.length || e.today?.training || e.today?.muscleGroups?.length;
+    if (e.date === current && hasData) {
+      streak++;
+      const d = new Date(current);
+      d.setDate(d.getDate() - 1);
+      current = d.toISOString().split("T")[0];
+    } else if (e.date < current) {
+      break;
+    }
+  }
+  return streak;
+}
+
 export default function App() {
   const [screen, setScreen]       = useState("home");
   const [entries, setEntries]     = useState([]);
@@ -190,6 +219,9 @@ export default function App() {
   const [mealCarb, setMealCarb]   = useState("");
   const [mealFat, setMealFat]     = useState("");
   const [mealKcal, setMealKcal]   = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recognitionRef = useRef(null);
   const [mealPhoto, setMealPhoto]   = useState(null);
   const [mealPhotoB64, setPhotoB64] = useState(null);
   const [analyzingPhoto, setAnPh]   = useState(false);
@@ -414,10 +446,9 @@ export default function App() {
       });
       const data = await res.json();
       if (data.ok) {
-        alert("✅ Notificaciones push activadas correctamente.");
         return true;
       } else {
-        alert("Error al guardar suscripción: " + data.error);
+        console.error("Push subscription error:", data.error);
         return false;
       }
     } catch (e) {
@@ -620,6 +651,54 @@ export default function App() {
     const c = meal.carb || 0;
     const f = meal.fat  || 0;
     return Math.round(p * 4 + c * 4 + f * 9);
+  };
+
+  const startRecording = () => {
+    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
+      alert("Tu navegador no soporta reconocimiento de voz. Prueba con Safari en iPhone.");
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SR();
+    recognition.lang = "es-ES";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => { setIsRecording(false); };
+    recognition.onerror = (e) => { setIsRecording(false); console.error("Speech error:", e.error); };
+    recognition.onresult = async (e) => {
+      const transcript = e.results[0][0].transcript;
+      if (!transcript) return;
+      setTranscribing(true);
+      try {
+        const res = await fetch("/api/coach", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            prompt: `El usuario ha dicho por voz lo que comió: "${transcript}". Extrae la descripción de la comida y estima los macros. Responde SOLO con JSON sin texto extra: {"desc":"descripción clara del plato","prot":25,"carb":40,"fat":12,"kcal":350}. Usa gramos enteros y kcal redondeadas.`,
+            system: "Eres un nutricionista experto. Interpretas descripciones de comidas en español y estimas macronutrientes. Respondes siempre en JSON puro sin markdown."
+          }),
+        });
+        const json = await res.json();
+        const raw = json.text?.replace(/```json|```/g,"").trim();
+        const data = JSON.parse(raw);
+        if (data.desc) setMealDesc(data.desc);
+        if (data.prot) setMealProt(String(data.prot));
+        if (data.carb) setMealCarb(String(data.carb));
+        if (data.fat)  setMealFat(String(data.fat));
+        if (data.kcal) setMealKcal(String(data.kcal));
+      } catch (e) { console.error("Transcription error:", e); }
+      setTranscribing(false);
+    };
+    recognition.start();
+  };
+
+  const stopRecording = () => {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
   };
 
   const addMeal = async () => {
@@ -847,7 +926,7 @@ export default function App() {
     </div>
   );
 
-  const showNav = ["home","stats","history","chat","settings"].includes(screen);
+  const showNav = ["home","stats","achievements","history","chat","settings"].includes(screen);
 
   return (
     <div style={g.page}>
@@ -864,6 +943,28 @@ export default function App() {
             <div style={g.sbox}><div style={{...g.sv,color:wDiff<0?"#4ade80":wDiff>0?"#f87171":"#4ade80"}}>{wDiff?(wDiff>0?`+${wDiff}`:wDiff):"—"}</div><div style={g.sl}>vs ayer</div></div>
             <div style={g.sbox}><div style={g.sv}>{today.meals.length}</div><div style={g.sl}>comidas</div></div>
           </div>
+
+          {(()=>{
+            const streak = calcStreak(entries);
+            if (streak === 0) return null;
+            const nextBadge = BADGES.find(b => b.days > streak);
+            const earnedBadges = BADGES.filter(b => b.days <= streak);
+            const lastBadge = earnedBadges[earnedBadges.length-1];
+            return (
+              <div style={{...g.card, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:32}}>{lastBadge?.icon || "🔥"}</div>
+                  <div>
+                    <div style={{fontSize:20,fontWeight:900,color:"#4ade80"}}>{streak} <span style={{fontSize:13,fontWeight:600,color:"rgba(74,222,128,.6)"}}>días seguidos</span></div>
+                    {nextBadge&&<div style={{fontSize:10,color:"rgba(232,245,232,.35)",marginTop:2}}>
+                      {nextBadge.days - streak} días para {nextBadge.icon} {nextBadge.label}
+                    </div>}
+                  </div>
+                </div>
+                {nextBadge&&<div style={{width:36,height:36,borderRadius:"50%",border:"2px solid rgba(74,222,128,.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,opacity:.35}}>{nextBadge.icon}</div>}
+              </div>
+            );
+          })()}
 
           <WeightCard
             saved={!!today.weight}
@@ -943,16 +1044,60 @@ export default function App() {
           {(()=>{
             const totalKcal = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
             const pct = Math.min(100, Math.round((totalKcal/kcalGoal)*100));
-            const barColor = pct>100?"#f87171":pct>75?"#fbbf24":"#4ade80";
+            const mealsWithKcal = today.meals.filter(m=>m.kcal>0);
+            const SLOT_COLORS = { breakfast:"#fb923c", morning_snack:"#fbbf24", lunch:"#4ade80", afternoon_snack:"#38bdf8", dinner:"#a78bfa", other:"#94a3b8" };
+            const [activeTip, setActiveTip] = useState(null);
+
             return totalKcal>0||kcalGoal>0 ? (
               <div style={g.card}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <div style={g.sec}>🔥 Calorías</div>
                   <span style={{fontSize:12,fontWeight:700,color:pct>100?"#f87171":"#4ade80"}}>{totalKcal} / {kcalGoal} kcal</span>
                 </div>
-                <div style={{background:"rgba(255,255,255,.08)",borderRadius:99,height:8,overflow:"hidden"}}>
-                  <div style={{height:"100%",borderRadius:99,background:barColor,width:`${pct}%`,transition:"width .5s ease"}}/>
+
+                {/* Segmented bar */}
+                <div style={{background:"rgba(255,255,255,.08)",borderRadius:99,height:16,overflow:"hidden",display:"flex",position:"relative"}}>
+                  {mealsWithKcal.length>0 ? mealsWithKcal.map((m,i)=>{
+                    const w = Math.min(100, (m.kcal/kcalGoal)*100);
+                    const color = SLOT_COLORS[m.slot] || SLOT_COLORS.other;
+                    const isActive = activeTip?.id === m.id;
+                    return <div key={m.id} onClick={()=>setActiveTip(isActive?null:{id:m.id,meal:m})}
+                      style={{height:"100%",width:`${w}%`,background:color,cursor:"pointer",
+                        borderRight:i<mealsWithKcal.length-1?"1px solid rgba(0,0,0,.3)":"none",
+                        opacity:activeTip&&!isActive?0.6:1,
+                        filter:isActive?"brightness(1.3)":"none",
+                        transition:"all .2s",minWidth:2}}/>;
+                  }) : (
+                    <div style={{height:"100%",borderRadius:99,background:"#4ade80",width:`${pct}%`,transition:"width .5s ease"}}/>
+                  )}
                 </div>
+
+                {/* Tooltip */}
+                {activeTip&&(()=>{
+                  const m = activeTip.meal;
+                  const sl = MEALS.find(x=>x.id===m.slot);
+                  const color = SLOT_COLORS[m.slot]||SLOT_COLORS.other;
+                  return <div style={{marginTop:8,padding:"8px 12px",borderRadius:10,background:"rgba(255,255,255,.05)",border:`1px solid ${color}44`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color}}>{sl?.icon} {sl?.label}</div>
+                      <div style={{fontSize:10,color:"rgba(232,245,232,.5)",marginTop:2}}>{m.desc?.slice(0,40)}{m.desc?.length>40?"...":""}</div>
+                    </div>
+                    <div style={{fontSize:18,fontWeight:900,color}}>{m.kcal}<span style={{fontSize:10,fontWeight:400,color:"rgba(232,245,232,.4)"}}>kcal</span></div>
+                  </div>;
+                })()}
+
+                {/* Legend dots */}
+                {mealsWithKcal.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+                  {mealsWithKcal.map(m=>{
+                    const sl=MEALS.find(x=>x.id===m.slot);
+                    const color=SLOT_COLORS[m.slot]||SLOT_COLORS.other;
+                    return <div key={m.id} style={{display:"flex",alignItems:"center",gap:4}}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:color}}/>
+                      <span style={{fontSize:9,color:"rgba(232,245,232,.4)"}}>{sl?.label} {m.kcal}kcal</span>
+                    </div>;
+                  })}
+                </div>}
+
                 <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{pct}% del objetivo</span>
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{Math.max(0,kcalGoal-totalKcal)} restantes</span>
@@ -1031,10 +1176,16 @@ export default function App() {
               {typeof Notification!=="undefined"&&(
                 <button onClick={async()=>{
                   if(Notification.permission==="granted") {
-                    if(userRef.current?.id) await subscribeToPush(userRef.current.id);
+                    if(userRef.current?.id) {
+                      const ok = await subscribeToPush(userRef.current.id);
+                      alert(ok ? "✅ Notificaciones activadas correctamente." : "⚠️ Error al activar notificaciones.");
+                    }
                   } else {
                     const perm = await Notification.requestPermission();
-                    if(perm==="granted" && userRef.current?.id) await subscribeToPush(userRef.current.id);
+                    if(perm==="granted" && userRef.current?.id) {
+                      const ok = await subscribeToPush(userRef.current.id);
+                      alert(ok ? "✅ Notificaciones activadas correctamente." : "⚠️ Error al activar notificaciones.");
+                    }
                   }
                 }} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
                   {Notification.permission==="granted"?"🔄 Reactivar push":"🔔 Activar"}
@@ -1119,8 +1270,26 @@ export default function App() {
               </button>
               {mealPhoto&&<button onClick={()=>{setMealPhoto(null);setPhotoB64(null);}} style={{padding:"12px 14px",borderRadius:14,border:"1px solid rgba(248,113,113,.2)",background:"rgba(248,113,113,.05)",color:"#f87171",fontSize:13,cursor:"pointer"}}>×</button>}
             </div>
-            <label style={g.lbl}>¿Qué comiste?</label>
-            <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz..." value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <label style={{...g.lbl,marginBottom:0}}>¿Qué comiste?</label>
+              <button
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onTouchStart={e=>{e.preventDefault();startRecording();}}
+                onTouchEnd={e=>{e.preventDefault();stopRecording();}}
+                style={{
+                  width:44,height:44,borderRadius:"50%",border:"none",cursor:"pointer",
+                  background:isRecording?"#f87171":transcribing?"rgba(251,146,60,.2)":"rgba(74,222,128,.12)",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,
+                  boxShadow:isRecording?"0 0 0 6px rgba(248,113,113,.25)":"none",
+                  transition:"all .2s",flexShrink:0
+                }}>
+                {transcribing?"⚡":isRecording?"⏹️":"🎙️"}
+              </button>
+            </div>
+            {isRecording&&<div style={{fontSize:11,color:"#f87171",marginBottom:8,textAlign:"center",animation:"pulse 1s infinite"}}>● Grabando... suelta para enviar</div>}
+            {transcribing&&<div style={{fontSize:11,color:"rgba(251,146,60,.8)",marginBottom:8,textAlign:"center"}}>⚡ Analizando audio...</div>}
+            <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz... o usa el 🎙️" value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
             <label style={g.lbl}>Macros estimados (opcional)</label>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
               <div>
@@ -1382,6 +1551,49 @@ export default function App() {
         </>}
 
 
+
+        {screen==="achievements"&&<>
+          <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>🏆 Logros</div>
+          {(()=>{
+            const streak = calcStreak(entries);
+            const totalDays = entries.filter(e=>e.today?.weight||e.today?.meals?.length||e.today?.training||e.today?.muscleGroups?.length).length;
+
+            return <>
+              <div style={g.card}>
+                <div style={g.sec}>🔥 Racha actual</div>
+                <div style={{fontSize:48,fontWeight:900,color:"#4ade80",textAlign:"center",padding:"10px 0"}}>{streak}</div>
+                <div style={{fontSize:13,color:"rgba(232,245,232,.4)",textAlign:"center",marginBottom:10}}>días consecutivos</div>
+                <div style={{fontSize:11,color:"rgba(232,245,232,.3)",textAlign:"center"}}>Total de días registrados: {totalDays}</div>
+              </div>
+
+              <div style={g.card}>
+                <div style={g.sec}>🎖️ Medallas</div>
+                <div style={{display:"flex",flexDirection:"column",gap:12,marginTop:4}}>
+                  {BADGES.map(b=>{
+                    const earned = streak >= b.days;
+                    return (
+                      <div key={b.id} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 14px",borderRadius:14,
+                        background:earned?"rgba(74,222,128,.08)":"rgba(255,255,255,.02)",
+                        border:earned?"1px solid rgba(74,222,128,.25)":"1px solid rgba(255,255,255,.06)",
+                        opacity:earned?1:0.5}}>
+                        <div style={{fontSize:32,filter:earned?"none":"grayscale(1)"}}>{b.icon}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:14,fontWeight:700,color:earned?"#4ade80":"rgba(232,245,232,.5)"}}>{b.label}</div>
+                          <div style={{fontSize:11,color:"rgba(232,245,232,.35)",marginTop:2}}>{b.desc}</div>
+                        </div>
+                        {earned
+                          ? <div style={{fontSize:11,color:"#4ade80",fontWeight:700}}>✓ Conseguida</div>
+                          : <div style={{fontSize:11,color:"rgba(232,245,232,.25)"}}>{b.days - streak} días</div>
+                        }
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>;
+          })()}
+        </>}
+
         {screen==="settings"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>⚙️ Ajustes</div>
 
@@ -1494,7 +1706,7 @@ export default function App() {
                 const dateStr = `${calYear}-${pad(calMonth+1)}-${pad(day)}`;
                 const entry = entryMap[dateStr];
                 const hasWeight = !!(entry?.today?.weight);
-                const hasTraining = !!(entry?.today?.training);
+                const hasTraining = !!(entry?.today?.training) || !!(entry?.today?.muscleGroups?.length);
                 const hasMeals = !!(entry?.today?.meals?.length);
                 const isToday = dateStr === todayStr;
                 const isSel = selDay === day;
@@ -1639,7 +1851,7 @@ export default function App() {
 
       {showNav&&(
         <div style={g.nav}>
-          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
+          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
             <button key={n.id} style={g.nb(screen===n.id)} onClick={()=>setScreen(n.id)}>
               <span style={{fontSize:20}}>{n.icon}</span>{n.label}
             </button>))}
