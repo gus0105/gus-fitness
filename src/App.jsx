@@ -1386,10 +1386,10 @@ export default function App() {
       })}
     </div>
 );
-    </div>       // línea 190: cierra macro bars
-  </div>         // NUEVO: cierra g.card
-) : null;        // NUEVO: cierra ternario
-})()}            // NUEVO: cierra IIFE de calorías
+    </div>       
+  </div>         
+) : null; 
+})()}       
 
 {supplements.length > 0 && (
   <div style={g.card}>
