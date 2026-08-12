@@ -2535,8 +2535,7 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
-    </div>
+
     {showNav&&(
       <div style={g.nav}>
         {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
