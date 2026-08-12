@@ -1387,6 +1387,9 @@ export default function App() {
     </div>
   );
 })()}
+
+</div>
+
 {supplements.length > 0 && (
   <div style={g.card}>
     <div style={g.sec}>💊 Suplementos</div>
