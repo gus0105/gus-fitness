@@ -1725,7 +1725,7 @@ export default function App() {
             </div>
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
-          </div>
+        
           </div>
         </>}
 
