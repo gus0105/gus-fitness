@@ -1447,12 +1447,12 @@ export default function App() {
               )}
             </div>
           </div>
-          </div>
-          </div>
-          </div>
-          </div>
-          </div>
         </>}
+          </div>
+          </div>
+          </div>
+          </div>
+          </div>
 
         {screen==="addMeal"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
@@ -1531,9 +1531,9 @@ export default function App() {
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
         </>}
+          </div>
+          </div>
 
-          </div>
-          </div>
         {screen==="addDrink"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
           <div style={{marginTop:6}}>
@@ -1608,7 +1608,7 @@ export default function App() {
             </div>
           </div>
         )}
-
+          </div>
 
         {screen==="stats"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
@@ -1754,11 +1754,9 @@ export default function App() {
             </>;
           })()}
         </>}
-
-
-
           </div>
           </div>
+
         {screen==="achievements"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>🏆 Logros</div>
           {(()=>{
@@ -2010,11 +2008,11 @@ export default function App() {
           </>;
         })()}
       </div>
+          </div>
+          </div>
+          </div>
+          </div>
 
-          </div>
-          </div>
-          </div>
-          </div>
       {editingMealId&&(
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
           <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.6)"}} onClick={()=>setEditingMealId(null)}/>
@@ -2059,6 +2057,7 @@ export default function App() {
           </div>
         </div>
       )}
+    </div>
     </div>
     {showNav&&(
       <div style={g.nav}>
