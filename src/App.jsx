@@ -1296,8 +1296,6 @@ export default function App() {
                     })}
                   </div>;
                 })()}
-              </div>
-            </div>
             ) : null;
           })()}
 
@@ -1987,6 +1985,8 @@ export default function App() {
           </div>
         </div>
       )}
+    </div>
+    </div>
     </div>
     </div>
     {showNav&&(
