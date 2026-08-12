@@ -1270,36 +1270,123 @@ export default function App() {
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{pct}% del objetivo</span>
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{Math.max(0,kcalGoal-totalKcal)} restantes</span>
                 </div>
+{/* Macro bars */}
+{(() => {
+  const totalProt = today.meals.reduce(
+    (sum, meal) => sum + (Number(meal.prot) || 0),
+    0
+  );
 
-                {/* Macro bars */}
-                {(()=>{
-                  const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
-                  const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
-                  const totalFat  = today.meals.reduce((s,m)=>s+(m.fat||0),0);
-                  if (!totalProt && !totalCarb && !totalFat) return null;
-                  return <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
-                    {[
-                      {label:"Proteína",val:totalProt,goal:macroGoals.prot,color:"#4ade80"},
-                      {label:"Carbos",  val:totalCarb,goal:macroGoals.carb,color:"#38bdf8"},
-                      {label:"Grasas",  val:totalFat, goal:macroGoals.fat, color:"#fb923c"},
-                    ].map(({label,val,goal,color})=>{
-                      const p=Math.min(100,Math.round((val/goal)*100));
-                      return <div key={label}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                          <span style={{fontSize:10,color:"rgba(232,245,232,.5)"}}>{label}</span>
-                          <span style={{fontSize:10,fontWeight:700,color}}>{Math.round(val)}<span style={{color:"rgba(232,245,232,.3)",fontWeight:400}}>/{goal}g</span></span>
-                        </div>
-                        <div style={{background:"rgba(255,255,255,.06)",borderRadius:99,height:6}}>
-                          <div style={{height:"100%",borderRadius:99,background:color,width:`${p}%`,transition:"width .5s ease"}}/>
-                        </div>
-                      </div>;
-                    })}
-                  </div>;
-                })()}
-              </div>
+  const totalCarb = today.meals.reduce(
+    (sum, meal) => sum + (Number(meal.carb) || 0),
+    0
+  );
+
+  const totalFat = today.meals.reduce(
+    (sum, meal) => sum + (Number(meal.fat) || 0),
+    0
+  );
+
+  // No mostrar las barras si no hay macros registrados
+  if (totalProt === 0 && totalCarb === 0 && totalFat === 0) {
+    return null;
+  }
+
+  const macros = [
+    {
+      label: "Proteína",
+      value: totalProt,
+      goal: macroGoals.prot,
+      color: "#4ade80",
+    },
+    {
+      label: "Carbos",
+      value: totalCarb,
+      goal: macroGoals.carb,
+      color: "#38bdf8",
+    },
+    {
+      label: "Grasas",
+      value: totalFat,
+      goal: macroGoals.fat,
+      color: "#fb923c",
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {macros.map(({ label, value, goal, color }) => {
+        const percentage =
+          goal > 0 ? Math.min(100, Math.round((value / goal) * 100)) : 0;
+
+        return (
+          <div key={label}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 4,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "rgba(232,245,232,.5)",
+                }}
+              >
+                {label}
+              </span>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color,
+                }}
+              >
+                {Math.round(value)}
+                <span
+                  style={{
+                    color: "rgba(232,245,232,.3)",
+                    fontWeight: 400,
+                  }}
+                >
+                  /{goal}g
+                </span>
+              </span>
             </div>
-            ) : null;
-          })()}
+
+            <div
+              style={{
+                background: "rgba(255,255,255,.06)",
+                borderRadius: 99,
+                height: 6,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  borderRadius: 99,
+                  background: color,
+                  width: `${percentage}%`,
+                  transition: "width .5s ease",
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+})()}
 
           {supplements.length>0&&(
             <div style={g.card}>
