@@ -1387,89 +1387,267 @@ export default function App() {
     </div>
   );
 })()}
+{supplements.length > 0 && (
+  <div style={g.card}>
+    <div style={g.sec}>💊 Suplementos</div>
 
-          {supplements.length>0&&(
-            <div style={g.card}>
-              <div style={g.sec}>💊 Suplementos</div>
-              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                {supplements.map(s=>{
-                  const doses = s.doses || 1;
-                  const takenCount = Array.from({length:doses},(_,i)=>`${s.id}_${i}`).filter(k=>(today.suppsTaken||[]).includes(k)).length;
-                  const allTaken = takenCount === doses;
-                  const pct = doses > 0 ? takenCount/doses : 0;
-                  return(
-                    <div key={s.id}
-                      onClick={()=>{
-                        // Find next unfilled dose index (left to right)
-                        const nextIndex = Array.from({length:doses},(_,i)=>i).find(i=>!(today.suppsTaken||[]).includes(`${s.id}_${i}`));
-                        if(nextIndex!==undefined) toggleSupp(s.id, nextIndex);
-                        else {
-                          // All filled — reset all
-                          const updated=(today.suppsTaken||[]).filter(k=>!k.startsWith(`${s.id}_`));
-                          setT({suppsTaken:updated});
-                        }
-                      }}
-                      style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 14px",borderRadius:14,cursor:"pointer",
-                        background:allTaken?"rgba(74,222,128,.12)":takenCount>0?"rgba(74,222,128,.06)":"rgba(255,255,255,.04)",
-                        border:allTaken?"1px solid rgba(74,222,128,.4)":takenCount>0?"1px solid rgba(74,222,128,.2)":"1px solid rgba(255,255,255,.1)",
-                        transition:"all .2s",userSelect:"none"}}>
-                      <div style={{fontSize:24,filter:takenCount>0?"none":"grayscale(1)",opacity:takenCount>0?1:.4}}>{s.icon}</div>
-                      <div style={{fontSize:10,fontWeight:600,color:allTaken?"#4ade80":takenCount>0?"rgba(74,222,128,.7)":"rgba(232,245,232,.4)"}}>{s.label}</div>
-                      <div style={{display:"flex",gap:4}}>
-                        {Array.from({length:doses},(_,i)=>{
-                          const filled = i < takenCount;
-                          return <div key={i} style={{width:16,height:16,borderRadius:"50%",
-                            background:filled?"#4ade80":"rgba(255,255,255,.1)",
-                            border:"2px solid rgba(74,222,128,.3)",transition:"all .2s",pointerEvents:"none"}}/>;
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      {supplements.map((s) => {
+        const doses = Math.max(1, Number(s.doses) || 1);
+        const taken = today.suppsTaken || [];
 
-          <div style={g.card}><div style={g.sec}>📈 Evolución peso</div><Chart/></div>
+        const takenIndexes = Array.from(
+          { length: doses },
+          (_, i) => i
+        ).filter((i) => taken.includes(`${s.id}_${i}`));
 
-          <div style={g.card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div style={g.sec}>🧠 Análisis del coach</div>
-              {analyses.length>0&&<span style={{fontSize:10,color:"rgba(74,222,128,.6)"}}>{analyses.length} análisis hoy</span>}
-            </div>
-            {analyses.length>0&&(
-              <div style={{background:"rgba(74,222,128,.06)",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#d1fae5",lineHeight:1.6}}>
-                <div style={{fontSize:10,color:"rgba(74,222,128,.5)",marginBottom:4}}>
-                  {analyses[analyses.length-1].type==="summary"?"📋 Resumen final":"⚡ Análisis rápido"} · {analyses[analyses.length-1].time}
-                </div>
-                {analyses[analyses.length-1].text.slice(0,150)}...
-                <button style={{display:"block",marginTop:8,background:"none",border:"none",color:"#4ade80",fontSize:11,cursor:"pointer",padding:0}} onClick={()=>{setAiText(analyses[analyses.length-1].text);setScreen("result");}}>Ver completo →</button>
-              </div>
-            )}
-            <div style={{display:"flex",gap:8}}>
-              <button style={{...g.btnS,flex:1,marginBottom:0,fontSize:12,padding:"12px 8px"}} onClick={analyzeNow}>⚡ Análisis ahora</button>
-              <button style={{...g.btnP,flex:1,marginBottom:0,fontSize:12,padding:"12px 8px"}} onClick={analyzeDay}>📋 Resumen del día</button>
-            </div>
-          </div>
+        const takenCount = takenIndexes.length;
+        const allTaken = takenCount === doses;
 
-          <div style={g.card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>
-                <div style={g.sec}>🔔 Notificaciones</div>
-                <div style={{fontSize:12,color:"rgba(232,245,232,.4)"}}>Configura en Ajustes</div>
-              </div>
-              {typeof Notification!=="undefined"&&Notification.permission!=="granted"&&(
-                <button onClick={requestNotifications} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
-                  Activar
-                </button>
-              )}
+        return (
+          <div
+            key={s.id}
+            onClick={() => {
+              // Find the first dose that has not been taken
+              const nextIndex = Array.from(
+                { length: doses },
+                (_, i) => i
+              ).find(
+                (i) => !taken.includes(`${s.id}_${i}`)
+              );
+
+              if (nextIndex !== undefined) {
+                toggleSupp(s.id, nextIndex);
+              } else {
+                // All doses taken → reset all doses
+                const updated = taken.filter(
+                  (k) => !k.startsWith(`${s.id}_`)
+                );
+
+                setT({ suppsTaken: updated });
+              }
+            }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              padding: "10px 14px",
+              borderRadius: 14,
+              cursor: "pointer",
+              background: allTaken
+                ? "rgba(74,222,128,.12)"
+                : takenCount > 0
+                ? "rgba(74,222,128,.06)"
+                : "rgba(255,255,255,.04)",
+              border: allTaken
+                ? "1px solid rgba(74,222,128,.4)"
+                : takenCount > 0
+                ? "1px solid rgba(74,222,128,.2)"
+                : "1px solid rgba(255,255,255,.1)",
+              transition: "all .2s",
+              userSelect: "none",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 24,
+                filter: takenCount > 0 ? "none" : "grayscale(1)",
+                opacity: takenCount > 0 ? 1 : 0.4,
+              }}
+            >
+              {s.icon}
+            </div>
+
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: allTaken
+                  ? "#4ade80"
+                  : takenCount > 0
+                  ? "rgba(74,222,128,.7)"
+                  : "rgba(232,245,232,.4)",
+              }}
+            >
+              {s.label}
+            </div>
+
+            <div style={{ display: "flex", gap: 4 }}>
+              {Array.from({ length: doses }, (_, i) => {
+                const filled = taken.includes(`${s.id}_${i}`);
+
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: "50%",
+                      background: filled
+                        ? "#4ade80"
+                        : "rgba(255,255,255,.1)",
+                      border: "2px solid rgba(74,222,128,.3)",
+                      transition: "all .2s",
+                      pointerEvents: "none",
+                    }}
+                  />
+                );
+              })}
             </div>
           </div>
-          </div>
-          </div>
-          </div>
-          </div>
-        </>}
+        );
+      })}
+    </div>
+  </div>
+)}
+
+<div style={g.card}>
+  <div style={g.sec}>📈 Evolución peso</div>
+  <Chart />
+</div>
+
+<div style={g.card}>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    }}
+  >
+    <div style={g.sec}>🧠 Análisis del coach</div>
+
+    {analyses.length > 0 && (
+      <span
+        style={{
+          fontSize: 10,
+          color: "rgba(74,222,128,.6)",
+        }}
+      >
+        {analyses.length} análisis hoy
+      </span>
+    )}
+  </div>
+
+  {analyses.length > 0 && (
+    <div
+      style={{
+        background: "rgba(74,222,128,.06)",
+        borderRadius: 10,
+        padding: "10px 12px",
+        marginBottom: 12,
+        fontSize: 12,
+        color: "#d1fae5",
+        lineHeight: 1.6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "rgba(74,222,128,.5)",
+          marginBottom: 4,
+        }}
+      >
+        {analyses[analyses.length - 1].type === "summary"
+          ? "📋 Resumen final"
+          : "⚡ Análisis rápido"}{" "}
+        · {analyses[analyses.length - 1].time}
+      </div>
+
+      {analyses[analyses.length - 1].text.slice(0, 150)}...
+
+      <button
+        style={{
+          display: "block",
+          marginTop: 8,
+          background: "none",
+          border: "none",
+          color: "#4ade80",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+        }}
+        onClick={() => {
+          setAiText(analyses[analyses.length - 1].text);
+          setScreen("result");
+        }}
+      >
+        Ver completo →
+      </button>
+    </div>
+  )}
+
+  <div style={{ display: "flex", gap: 8 }}>
+    <button
+      style={{
+        ...g.btnS,
+        flex: 1,
+        marginBottom: 0,
+        fontSize: 12,
+        padding: "12px 8px",
+      }}
+      onClick={analyzeNow}
+    >
+      ⚡ Análisis ahora
+    </button>
+
+    <button
+      style={{
+        ...g.btnP,
+        flex: 1,
+        marginBottom: 0,
+        fontSize: 12,
+        padding: "12px 8px",
+      }}
+      onClick={analyzeDay}
+    >
+      📋 Resumen del día
+    </button>
+  </div>
+</div>
+
+<div style={g.card}>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+    }}
+  >
+    <div>
+      <div style={g.sec}>🔔 Notificaciones</div>
+
+      <div
+        style={{
+          fontSize: 12,
+          color: "rgba(232,245,232,.4)",
+        }}
+      >
+        Configura en Ajustes
+      </div>
+    </div>
+
+    {typeof Notification !== "undefined" &&
+      Notification.permission !== "granted" && (
+        <button
+          onClick={requestNotifications}
+          style={{
+            background: "rgba(74,222,128,.1)",
+            border: "1px solid rgba(74,222,128,.3)",
+            borderRadius: 9,
+            color: "#4ade80",
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "5px 10px",
+            cursor: "pointer",
+          }}
+        >
+          Activar
+        </button>
+      )}
+  </div>
+</div>
 
         {screen==="addMeal"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
