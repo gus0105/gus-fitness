@@ -1297,6 +1297,7 @@ export default function App() {
                   </div>;
                 })()}
               </div>
+            </div>
             ) : null;
           })()}
 
@@ -1365,94 +1366,23 @@ export default function App() {
           </div>
 
           <div style={g.card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div style={g.sec}>🔔 Notificaciones</div>
-              {typeof Notification!=="undefined"&&(
-                <button onClick={async()=>{
-                  if(Notification.permission==="granted") {
-                    if(userRef.current?.id) {
-                      const ok = await subscribeToPush(userRef.current.id);
-                      alert(ok ? "✅ Notificaciones activadas correctamente." : "⚠️ Error al activar notificaciones.");
-                    }
-                  } else {
-                    const perm = await Notification.requestPermission();
-                    if(perm==="granted" && userRef.current?.id) {
-                      const ok = await subscribeToPush(userRef.current.id);
-                      alert(ok ? "✅ Notificaciones activadas correctamente." : "⚠️ Error al activar notificaciones.");
-                    }
-                  }
-                }} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
-                  {Notification.permission==="granted"?"🔄 Reactivar push":"🔔 Activar"}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={g.sec}>🔔 Notificaciones</div>
+                <div style={{fontSize:12,color:"rgba(232,245,232,.4)"}}>Configura en Ajustes</div>
+              </div>
+              {typeof Notification!=="undefined"&&Notification.permission!=="granted"&&(
+                <button onClick={requestNotifications} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
+                  Activar
                 </button>
               )}
             </div>
-
-            <div style={{marginBottom:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:600}}>🍽️ Comidas <span style={{fontSize:10,color:"rgba(232,245,232,.4)"}}>(máx 5)</span></span>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                  <input type="checkbox" checked={notifConfig.meals.enabled} onChange={e=>{ const c={...notifConfig,meals:{...notifConfig.meals,enabled:e.target.checked}}; setNotifConfig(c); }}/>
-                  <span style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>Activar</span>
-                </label>
-              </div>
-              {notifConfig.meals.times.map((t,i)=>(
-                <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
-                  <input type="time" value={t} onChange={e=>{ const times=[...notifConfig.meals.times]; times[i]=e.target.value; const c={...notifConfig,meals:{...notifConfig.meals,times}}; setNotifConfig(c); }}
-                    style={{...g.inp,marginBottom:0,flex:1,padding:"8px 10px",fontSize:13}}/>
-                  <button onClick={()=>{ const times=notifConfig.meals.times.filter((_,j)=>j!==i); const c={...notifConfig,meals:{...notifConfig.meals,times}}; setNotifConfig(c); }}
-                    style={{background:"rgba(248,113,113,.1)",border:"1px solid rgba(248,113,113,.2)",borderRadius:8,color:"#f87171",fontSize:13,padding:"6px 10px",cursor:"pointer"}}>×</button>
-                </div>
-              ))}
-              {notifConfig.meals.times.length<5&&(
-                <button onClick={()=>{ const times=[...notifConfig.meals.times,"12:00"]; const c={...notifConfig,meals:{...notifConfig.meals,times}}; setNotifConfig(c); }}
-                  style={{...g.btnS,marginBottom:0,fontSize:12,padding:"8px"}}>+ Añadir hora</button>
-              )}
-            </div>
-
-            <div style={{marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:600}}>⚖️ Peso diario</span>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                  <input type="checkbox" checked={notifConfig.weight.enabled} onChange={e=>{ const c={...notifConfig,weight:{...notifConfig.weight,enabled:e.target.checked}}; setNotifConfig(c); }}/>
-                  <span style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>Activar</span>
-                </label>
-              </div>
-              <input type="time" value={notifConfig.weight.time} onChange={e=>{ const c={...notifConfig,weight:{...notifConfig.weight,time:e.target.value}}; setNotifConfig(c); }}
-                style={{...g.inp,marginBottom:0,padding:"8px 10px",fontSize:13}}/>
-            </div>
-
-            <div style={{marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:600}}>💊 Suplementos</span>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                  <input type="checkbox" checked={notifConfig.supplements.enabled} onChange={e=>{ const c={...notifConfig,supplements:{...notifConfig.supplements,enabled:e.target.checked}}; setNotifConfig(c); }}/>
-                  <span style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>Activar</span>
-                </label>
-              </div>
-              <input type="time" value={notifConfig.supplements.time} onChange={e=>{ const c={...notifConfig,supplements:{...notifConfig.supplements,time:e.target.value}}; setNotifConfig(c); }}
-                style={{...g.inp,marginBottom:0,padding:"8px 10px",fontSize:13}}/>
-            </div>
-
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:12,fontWeight:600}}>🎯 Mensaje motivacional</span>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                  <input type="checkbox" checked={notifConfig.motivational.enabled} onChange={e=>{ const c={...notifConfig,motivational:{...notifConfig.motivational,enabled:e.target.checked}}; setNotifConfig(c); }}/>
-                  <span style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>Activar</span>
-                </label>
-              </div>
-              {notifConfig.motivational.enabled&&(
-                <input type="time" value={notifConfig.motivational.time} onChange={e=>{ const c={...notifConfig,motivational:{...notifConfig.motivational,time:e.target.value}}; setNotifConfig(c); }}
-                  style={{...g.inp,marginBottom:0,padding:"8px 10px",fontSize:13}}/>
-              )}
-            </div>
+          </div>
+          </div>
+          </div>
+          </div>
           </div>
         </>}
-          </div>
-          </div>
-          </div>
-          </div>
-          </div>
 
         {screen==="addMeal"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
@@ -1530,9 +1460,9 @@ export default function App() {
             </div>
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
+          </div>
+          </div>
         </>}
-          </div>
-          </div>
 
         {screen==="addDrink"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
@@ -1753,9 +1683,9 @@ export default function App() {
               </div>
             </>;
           })()}
+          </div>
+          </div>
         </>}
-          </div>
-          </div>
 
         {screen==="achievements"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>🏆 Logros</div>
