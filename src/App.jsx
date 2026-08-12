@@ -1648,87 +1648,375 @@ export default function App() {
       )}
   </div>
 </div>
+{screen === "addMeal" && (
+  <>
+    <button
+      style={g.back}
+      onClick={() => setScreen("home")}
+    >
+      ← Volver
+    </button>
 
-        {screen==="addMeal"&&<>
-          <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
-          <div style={{marginTop:6}}>
-            <div style={{fontSize:18,fontWeight:900,marginBottom:20}}>🍽️ Añadir comida</div>
-            <label style={g.lbl}>Momento del día</label>
-            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:18}}>
-              {MEALS.map(m=><button key={m.id} style={g.chip(mealSlot===m.id)} onClick={()=>setMealSlot(m.id)}>{m.icon} {m.label}</button>)}
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhotoChange}/>
-            <div style={{display:"flex",gap:8,marginBottom:14}}>
-              <button onClick={()=>fileRef.current?.click()} style={{flex:1,padding:"12px",borderRadius:14,border:"2px dashed rgba(74,222,128,.2)",background:mealPhoto?"rgba(74,222,128,.08)":"rgba(255,255,255,.03)",color:mealPhoto?"#4ade80":"rgba(232,245,232,.3)",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                {analyzingPhoto ? <><span style={{fontSize:16}}>⚡</span> Analizando...</> : mealPhoto ? <><span>📷</span> Foto añadida ✓</> : <><span>📷</span> Añadir foto (estima macros)</>}
-              </button>
-              {mealPhoto&&<button onClick={()=>{setMealPhoto(null);setPhotoB64(null);}} style={{padding:"12px 14px",borderRadius:14,border:"1px solid rgba(248,113,113,.2)",background:"rgba(248,113,113,.05)",color:"#f87171",fontSize:13,cursor:"pointer"}}>×</button>}
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <label style={{...g.lbl,marginBottom:0}}>¿Qué comiste?</label>
-              <div style={{position:"relative",width:48,height:48,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {isRecording&&<>
-                  <div style={{position:"absolute",width:48,height:48,borderRadius:"50%",background:"rgba(248,113,113,.2)",animation:"ping 1s cubic-bezier(0,0,.2,1) infinite"}}/>
-                  <div style={{position:"absolute",width:56,height:56,borderRadius:"50%",background:"rgba(248,113,113,.1)",animation:"ping 1.5s cubic-bezier(0,0,.2,1) infinite"}}/>
-                </>}
-                <button onClick={toggleRecording}
-                  style={{
-                    width:44,height:44,borderRadius:"50%",border:"none",cursor:"pointer",
-                    background:isRecording?"#f87171":transcribing?"rgba(251,146,60,.3)":"rgba(74,222,128,.12)",
-                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,
-                    position:"relative",zIndex:1,
-                    transform:isRecording?"scale(1.1)":"scale(1)",
-                    transition:"all .2s",
-                    boxShadow:isRecording?"0 0 0 3px rgba(248,113,113,.4)":"none"
-                  }}>
-                  {transcribing?"⚡":isRecording?"⏹️":"🎙️"}
-                </button>
-              </div>
-            </div>
-            {isRecording&&<div style={{fontSize:11,color:"#f87171",marginBottom:8,textAlign:"center"}}>● Grabando... para cuando termines</div>}
-            {transcribing&&<div style={{fontSize:11,color:"rgba(251,146,60,.8)",marginBottom:8,textAlign:"center"}}>⚡ Analizando audio...</div>}
-            <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz... o usa el 🎙️" value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
-            <label style={g.lbl}>Macros estimados (opcional)</label>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
-              <div>
-                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Proteína</div>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
-                    value={mealProt} onChange={e=>setMealProt(e.target.value)}/>
-                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
-                </div>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Carbos</div>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
-                    value={mealCarb} onChange={e=>setMealCarb(e.target.value)}/>
-                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
-                </div>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Grasas</div>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="decimal" placeholder="0"
-                    value={mealFat} onChange={e=>setMealFat(e.target.value)}/>
-                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>g</span>
-                </div>
-              </div>
-            </div>
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>Calorías totales</div>
-              <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <input style={{...g.inp,marginBottom:0,flex:1,padding:"10px 8px",fontSize:13}} type="number" inputMode="numeric" placeholder="ej: 450 (se estima si hay macros)"
-                  value={mealKcal} onChange={e=>setMealKcal(e.target.value)}/>
-                <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kcal</span>
-              </div>
-            </div>
-            <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
-          </div>
-        
-          </div>
-        </>}
+    <div style={{ marginTop: 6 }}>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 900,
+          marginBottom: 20,
+        }}
+      >
+        🍽️ Añadir comida
+      </div>
 
+      <label style={g.lbl}>Momento del día</label>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 7,
+          flexWrap: "wrap",
+          marginBottom: 18,
+        }}
+      >
+        {MEALS.map((m) => (
+          <button
+            key={m.id}
+            style={g.chip(mealSlot === m.id)}
+            onClick={() => setMealSlot(m.id)}
+          >
+            {m.icon} {m.label}
+          </button>
+        ))}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handlePhotoChange}
+      />
+
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 14,
+        }}
+      >
+        <button
+          onClick={() => fileRef.current?.click()}
+          style={{
+            flex: 1,
+            padding: "12px",
+            borderRadius: 14,
+            border: "2px dashed rgba(74,222,128,.2)",
+            background: mealPhoto
+              ? "rgba(74,222,128,.08)"
+              : "rgba(255,255,255,.03)",
+            color: mealPhoto
+              ? "#4ade80"
+              : "rgba(232,245,232,.3)",
+            fontSize: 13,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          {analyzingPhoto ? (
+            <>
+              <span style={{ fontSize: 16 }}>⚡</span>
+              Analizando...
+            </>
+          ) : mealPhoto ? (
+            <>
+              <span>📷</span>
+              Foto añadida ✓
+            </>
+          ) : (
+            <>
+              <span>📷</span>
+              Añadir foto (estima macros)
+            </>
+          )}
+        </button>
+
+        {mealPhoto && (
+          <button
+            onClick={() => {
+              setMealPhoto(null);
+              setPhotoB64(null);
+            }}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 14,
+              border: "1px solid rgba(248,113,113,.2)",
+              background: "rgba(248,113,113,.05)",
+              color: "#f87171",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
+        <label
+          style={{
+            ...g.lbl,
+            marginBottom: 0,
+          }}
+        >
+          ¿Qué comiste?
+        </label>
+
+        <div
+          style={{
+            position: "relative",
+            width: 48,
+            height: 48,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isRecording && (
+            <>
+              <div
+                style={{
+                  position: "absolute",
+                  width: 48,
+                  height: 48,
+                  borderRadius: "50%",
+                  background: "rgba(248,113,113,.2)",
+                  animation:
+                    "ping 1s cubic-bezier(0,0,.2,1) infinite",
+                }}
+              />
+
+              <div
+                style={{
+                  position: "absolute",
+                  width: 56,
+                  height: 56,
+                  borderRadius: "50%",
+                  background: "rgba(248,113,113,.1)",
+                  animation:
+                    "ping 1.5s cubic-bezier(0,0,.2,1) infinite",
+                }}
+              />
+            </>
+          )}
+
+          <button
+            onClick={toggleRecording}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              border: "none",
+              cursor: "pointer",
+              background: isRecording
+                ? "#f87171"
+                : transcribing
+                ? "rgba(251,146,60,.3)"
+                : "rgba(74,222,128,.12)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 22,
+              position: "relative",
+              zIndex: 1,
+              transform: isRecording
+                ? "scale(1.1)"
+                : "scale(1)",
+              transition: "all .2s",
+              boxShadow: isRecording
+                ? "0 0 0 3px rgba(248,113,113,.4)"
+                : "none",
+            }}
+          >
+            {transcribing
+              ? "⚡"
+              : isRecording
+              ? "⏹️"
+              : "🎙️"}
+          </button>
+        </div>
+      </div>
+
+      {isRecording && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "#f87171",
+            marginBottom: 8,
+            textAlign: "center",
+          }}
+        >
+          ● Grabando... para cuando termines
+        </div>
+      )}
+
+      {transcribing && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(251,146,60,.8)",
+            marginBottom: 8,
+            textAlign: "center",
+          }}
+        >
+          ⚡ Analizando audio...
+        </div>
+      )}
+
+      <textarea
+        style={{
+          ...g.inp,
+          minHeight: 80,
+          resize: "none",
+        }}
+        placeholder="ej: 150g pechuga, ensalada, arroz... o usa el 🎙️"
+        value={mealDesc}
+        onChange={(e) => setMealDesc(e.target.value)}
+      />
+
+      <label style={g.lbl}>
+        Macros estimados (opcional)
+      </label>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 8,
+          marginBottom: 14,
+        }}
+      >
+        {[
+          { label: "Proteína", value: mealProt, setter: setMealProt },
+          { label: "Carbos", value: mealCarb, setter: setMealCarb },
+          { label: "Grasas", value: mealFat, setter: setMealFat },
+        ].map(({ label, value, setter }) => (
+          <div key={label}>
+            <div
+              style={{
+                fontSize: 9,
+                color: "rgba(74,222,128,.55)",
+                fontWeight: 700,
+                letterSpacing: ".1em",
+                textTransform: "uppercase",
+                marginBottom: 4,
+              }}
+            >
+              {label}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <input
+                style={{
+                  ...g.inp,
+                  marginBottom: 0,
+                  flex: 1,
+                  padding: "10px 8px",
+                  fontSize: 13,
+                }}
+                type="number"
+                inputMode="decimal"
+                placeholder="0"
+                value={value}
+                onChange={(e) => setter(e.target.value)}
+              />
+
+              <span
+                style={{
+                  color: "rgba(232,245,232,.35)",
+                  fontSize: 11,
+                }}
+              >
+                g
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <div
+          style={{
+            fontSize: 9,
+            color: "rgba(74,222,128,.55)",
+            fontWeight: 700,
+            letterSpacing: ".1em",
+            textTransform: "uppercase",
+            marginBottom: 4,
+          }}
+        >
+          Calorías totales
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <input
+            style={{
+              ...g.inp,
+              marginBottom: 0,
+              flex: 1,
+              padding: "10px 8px",
+              fontSize: 13,
+            }}
+            type="number"
+            inputMode="numeric"
+            placeholder="ej: 450 (se estima si hay macros)"
+            value={mealKcal}
+            onChange={(e) => setMealKcal(e.target.value)}
+          />
+
+          <span
+            style={{
+              color: "rgba(232,245,232,.35)",
+              fontSize: 11,
+            }}
+          >
+            kcal
+          </span>
+        </div>
+      </div>
+
+      <button
+        style={g.btnP}
+        onClick={addMeal}
+      >
+        Guardar comida ✓
+      </button>
+    </div>
+  </>
+)}
         {screen==="addDrink"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
           <div style={{marginTop:6}}>
