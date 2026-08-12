@@ -654,12 +654,36 @@ export default function App() {
     return Math.round(p * 4 + c * 4 + f * 9);
   };
 
+  const analyzeTranscript = async (transcript) => {
+    if (!transcript?.trim()) return;
+    setTranscribing(true);
+    try {
+      const res = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: `El usuario ha dicho por voz lo que comió: "${transcript}". Extrae la descripción de la comida y estima los macros. Responde SOLO con JSON sin texto extra: {"desc":"descripción clara del plato","prot":25,"carb":40,"fat":12,"kcal":350}. Usa gramos enteros y kcal redondeadas.`,
+          system: "Eres un nutricionista experto. Interpretas descripciones de comidas en español y estimas macronutrientes. Respondes siempre en JSON puro sin markdown."
+        }),
+      });
+      const json = await res.json();
+      const raw = json.text?.replace(/```json|```/g,"").trim();
+      const data = JSON.parse(raw);
+      if (data.desc) setMealDesc(data.desc);
+      if (data.prot) setMealProt(String(data.prot));
+      if (data.carb) setMealCarb(String(data.carb));
+      if (data.fat)  setMealFat(String(data.fat));
+      if (data.kcal) setMealKcal(String(data.kcal));
+    } catch (e) { console.error("Transcription error:", e); }
+    setTranscribing(false);
+  };
+
   const startRecording = () => {
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      alert("Tu navegador no soporta reconocimiento de voz. Prueba con Safari en iPhone.");
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert("Tu navegador no soporta reconocimiento de voz. Prueba con Safari en iPhone o Chrome.");
       return;
     }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.lang = "es-ES";
     recognition.continuous = false;
@@ -668,38 +692,24 @@ export default function App() {
     recognitionRef.current = recognition;
 
     recognition.onstart = () => setIsRecording(true);
-    recognition.onend = () => { setIsRecording(false); };
-    recognition.onerror = (e) => { setIsRecording(false); console.error("Speech error:", e.error); };
-    recognition.onresult = async (e) => {
-      const transcript = e.results[0][0].transcript;
-      if (!transcript) return;
-      setTranscribing(true);
-      try {
-        const res = await fetch("/api/coach", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            prompt: `El usuario ha dicho por voz lo que comió: "${transcript}". Extrae la descripción de la comida y estima los macros. Responde SOLO con JSON sin texto extra: {"desc":"descripción clara del plato","prot":25,"carb":40,"fat":12,"kcal":350}. Usa gramos enteros y kcal redondeadas.`,
-            system: "Eres un nutricionista experto. Interpretas descripciones de comidas en español y estimas macronutrientes. Respondes siempre en JSON puro sin markdown."
-          }),
-        });
-        const json = await res.json();
-        const raw = json.text?.replace(/```json|```/g,"").trim();
-        const data = JSON.parse(raw);
-        if (data.desc) setMealDesc(data.desc);
-        if (data.prot) setMealProt(String(data.prot));
-        if (data.carb) setMealCarb(String(data.carb));
-        if (data.fat)  setMealFat(String(data.fat));
-        if (data.kcal) setMealKcal(String(data.kcal));
-      } catch (e) { console.error("Transcription error:", e); }
-      setTranscribing(false);
+    recognition.onerror = (e) => {
+      setIsRecording(false);
+      console.error("Speech error:", e.error);
+      if (e.error === "not-allowed") alert("Permiso de micrófono denegado. Actívalo en Ajustes del iPhone.");
     };
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setMealDesc(transcript); // Show transcript immediately
+      analyzeTranscript(transcript); // Then analyze
+    };
+    recognition.onend = () => setIsRecording(false);
     recognition.start();
   };
 
   const stopRecording = () => {
-    recognitionRef.current?.stop();
-    setIsRecording(false);
+    // Don't force stop - let recognition finish naturally for better results
+    // Just update UI, recognition will call onend itself
+    setTimeout(() => recognitionRef.current?.stop(), 300);
   };
 
   const addMeal = async () => {
