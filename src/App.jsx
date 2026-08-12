@@ -1105,8 +1105,8 @@ export default function App() {
           75%, 100% { transform: scale(2); opacity: 0; }
         }
       `}</style>
-      <div style={{overflow:"hidden"}}>
-      <div style={{...g.wrap, transform: transitioning ? `translateX(${slideDir * -30}px)` : "translateX(0)", opacity: transitioning ? 0 : 1, transition:"transform .18s ease, opacity .18s ease"}}>
+      <div style={g.wrap}>
+        <div style={{opacity: transitioning ? 0 : 1, transform: transitioning ? `translateX(${slideDir * -20}px)` : "translateX(0)", transition:"opacity .18s ease, transform .18s ease"}}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
 <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
@@ -2052,7 +2052,7 @@ export default function App() {
         </div>
       )}
 
-      </div></div>
+        </div>
       {showNav&&(
         <div style={g.nav}>
           {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
