@@ -1386,11 +1386,12 @@ export default function App() {
       })}
     </div>
 );
-  })()}
-  </div>
-  ) : null;
-  })()}
- {supplements.length > 0 && (
+    </div>       // línea 190: cierra macro bars
+  </div>         // NUEVO: cierra g.card
+) : null;        // NUEVO: cierra ternario
+})()}            // NUEVO: cierra IIFE de calorías
+
+{supplements.length > 0 && (
   <div style={g.card}>
     <div style={g.sec}>💊 Suplementos</div>
 
