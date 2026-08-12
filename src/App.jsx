@@ -2489,11 +2489,7 @@ export default function App() {
             }
           </>;
         })()}
-                
 
-          </div>
-          </div>
-          </div>
 
       {editingMealId&&(
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
