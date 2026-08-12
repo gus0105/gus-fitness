@@ -152,6 +152,7 @@ function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
         </div>
       </div>
       {w&&<button style={{...g.btnP,marginBottom:0}} onClick={()=>onSave(w,gr,im)}>Guardar medición ✓</button>}
+    </div>
   );
 }
 
