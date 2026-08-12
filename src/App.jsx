@@ -678,7 +678,12 @@ export default function App() {
     setTranscribing(false);
   };
 
-  const startRecording = () => {
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       alert("Tu navegador no soporta reconocimiento de voz. Prueba con Safari en iPhone o Chrome.");
@@ -686,30 +691,34 @@ export default function App() {
     }
     const recognition = new SR();
     recognition.lang = "es-ES";
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognitionRef.current = recognition;
 
     recognition.onstart = () => setIsRecording(true);
     recognition.onerror = (e) => {
       setIsRecording(false);
-      console.error("Speech error:", e.error);
       if (e.error === "not-allowed") alert("Permiso de micrófono denegado. Actívalo en Ajustes del iPhone.");
     };
     recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      setMealDesc(transcript); // Show transcript immediately
-      analyzeTranscript(transcript); // Then analyze
+      let interim = "";
+      let final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      // Show interim results while speaking
+      if (interim) setMealDesc(interim);
+      // When final result arrives, analyze
+      if (final) {
+        setMealDesc(final);
+        analyzeTranscript(final);
+        recognition.stop();
+      }
     };
     recognition.onend = () => setIsRecording(false);
     recognition.start();
-  };
-
-  const stopRecording = () => {
-    // Don't force stop - let recognition finish naturally for better results
-    // Just update UI, recognition will call onend itself
-    setTimeout(() => recognitionRef.current?.stop(), 300);
   };
 
   const addMeal = async () => {
@@ -925,6 +934,11 @@ export default function App() {
   if (!user) return (
     <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+      <style>{`
+        @keyframes ping {
+          75%, 100% { transform: scale(2); opacity: 0; }
+        }
+      `}</style>
       <div style={{ maxWidth:360, width:"100%", padding:"0 24px", textAlign:"center" }}>
         <div style={{ fontSize:64, marginBottom:16 }}>💪</div>
         <div style={{ fontSize:28, fontWeight:900, color:"#4ade80", marginBottom:8 }}>Gus Coach</div>
@@ -942,6 +956,11 @@ export default function App() {
   return (
     <div style={g.page}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+      <style>{`
+        @keyframes ping {
+          75%, 100% { transform: scale(2); opacity: 0; }
+        }
+      `}</style>
       <div style={g.wrap}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
@@ -1281,22 +1300,26 @@ export default function App() {
             </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <label style={{...g.lbl,marginBottom:0}}>¿Qué comiste?</label>
-              <button
-                onMouseDown={startRecording}
-                onMouseUp={stopRecording}
-                onTouchStart={e=>{e.preventDefault();startRecording();}}
-                onTouchEnd={e=>{e.preventDefault();stopRecording();}}
-                style={{
-                  width:44,height:44,borderRadius:"50%",border:"none",cursor:"pointer",
-                  background:isRecording?"#f87171":transcribing?"rgba(251,146,60,.2)":"rgba(74,222,128,.12)",
-                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,
-                  boxShadow:isRecording?"0 0 0 6px rgba(248,113,113,.25)":"none",
-                  transition:"all .2s",flexShrink:0
-                }}>
-                {transcribing?"⚡":isRecording?"⏹️":"🎙️"}
-              </button>
+              <div style={{position:"relative",width:48,height:48,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {isRecording&&<>
+                  <div style={{position:"absolute",width:48,height:48,borderRadius:"50%",background:"rgba(248,113,113,.2)",animation:"ping 1s cubic-bezier(0,0,.2,1) infinite"}}/>
+                  <div style={{position:"absolute",width:56,height:56,borderRadius:"50%",background:"rgba(248,113,113,.1)",animation:"ping 1.5s cubic-bezier(0,0,.2,1) infinite"}}/>
+                </>}
+                <button onClick={toggleRecording}
+                  style={{
+                    width:44,height:44,borderRadius:"50%",border:"none",cursor:"pointer",
+                    background:isRecording?"#f87171":transcribing?"rgba(251,146,60,.3)":"rgba(74,222,128,.12)",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,
+                    position:"relative",zIndex:1,
+                    transform:isRecording?"scale(1.1)":"scale(1)",
+                    transition:"all .2s",
+                    boxShadow:isRecording?"0 0 0 3px rgba(248,113,113,.4)":"none"
+                  }}>
+                  {transcribing?"⚡":isRecording?"⏹️":"🎙️"}
+                </button>
+              </div>
             </div>
-            {isRecording&&<div style={{fontSize:11,color:"#f87171",marginBottom:8,textAlign:"center",animation:"pulse 1s infinite"}}>● Grabando... suelta para enviar</div>}
+            {isRecording&&<div style={{fontSize:11,color:"#f87171",marginBottom:8,textAlign:"center"}}>● Grabando... para cuando termines</div>}
             {transcribing&&<div style={{fontSize:11,color:"rgba(251,146,60,.8)",marginBottom:8,textAlign:"center"}}>⚡ Analizando audio...</div>}
             <textarea style={{...g.inp,minHeight:80,resize:"none"}} placeholder="ej: 150g pechuga, ensalada, arroz... o usa el 🎙️" value={mealDesc} onChange={e=>setMealDesc(e.target.value)}/>
             <label style={g.lbl}>Macros estimados (opcional)</label>
