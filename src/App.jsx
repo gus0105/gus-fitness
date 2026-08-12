@@ -1385,7 +1385,6 @@ export default function App() {
         );
       })}
     </div>
-    </div>
 );
 })()}
 {supplements.length > 0 && (
