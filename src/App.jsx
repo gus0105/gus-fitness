@@ -2091,7 +2091,7 @@ export default function App() {
             </div>
           </div>
         )}
-          </div>
+       
 
         {screen==="stats"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
