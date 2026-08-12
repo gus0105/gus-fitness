@@ -1089,8 +1089,6 @@ export default function App() {
         </div>}
       </div>
     </div>
-  </div>
-  </div>
   );
 
   const showNav = ["home","stats","achievements","history","chat","settings"].includes(screen);
@@ -1299,9 +1297,6 @@ export default function App() {
                   </div>;
                 })()}
               </div>
-              </div>
-              </div>
-              </div>
             ) : null;
           })()}
 
@@ -1382,8 +1377,6 @@ export default function App() {
               )}
             </div>
           </div>
-          </div>
-          </div>
         </>}
 
         {screen==="addMeal"&&<>
@@ -1462,8 +1455,6 @@ export default function App() {
             </div>
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
-          </div>
-          </div>
         </>}
 
         {screen==="addDrink"&&<>
@@ -1540,7 +1531,6 @@ export default function App() {
             </div>
           </div>
         )}
-          </div>
 
         {screen==="stats"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>📊 Estadísticas</div>
@@ -1685,8 +1675,6 @@ export default function App() {
               </div>
             </>;
           })()}
-          </div>
-          </div>
         </>}
 
         {screen==="achievements"&&<>
@@ -1940,10 +1928,6 @@ export default function App() {
           </>;
         })()}
       </div>
-          </div>
-          </div>
-          </div>
-          </div>
 
       {editingMealId&&(
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
@@ -1989,8 +1973,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
-    </div>
     {showNav&&(
       <div style={g.nav}>
         {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
