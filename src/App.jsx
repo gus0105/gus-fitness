@@ -1089,6 +1089,8 @@ export default function App() {
         </div>}
       </div>
     </div>
+  </div>
+  </div>
   );
 
   const showNav = ["home","stats","achievements","history","chat","settings"].includes(screen);
@@ -1296,6 +1298,10 @@ export default function App() {
                     })}
                   </div>;
                 })()}
+              </div>
+              </div>
+              </div>
+              </div>
             ) : null;
           })()}
 
@@ -1375,10 +1381,6 @@ export default function App() {
                 </button>
               )}
             </div>
-          </div>
-          </div>
-          </div>
-          </div>
           </div>
           </div>
           </div>
