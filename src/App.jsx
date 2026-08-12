@@ -152,7 +152,6 @@ function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
         </div>
       </div>
       {w&&<button style={{...g.btnP,marginBottom:0}} onClick={()=>onSave(w,gr,im)}>Guardar medición ✓</button>}
-    </div>
   );
 }
 
@@ -225,8 +224,10 @@ export default function App() {
   const [editingSettings, setEditingSettings] = useState(false);
   const [newSupName, setNewSupName] = useState("");
   const [newSupIcon, setNewSupIcon] = useState("💊");
-  const [userProfile, setUserProfile] = useState(null); // onboarding data
+  const [userProfile, setUserProfile] = useState(null);
   const [macroGoals, setMacroGoals] = useState({ prot: 147, carb: 193, fat: 70 });
+  const [onboardStep, setOnboardStep] = useState(0);
+  const [onboardData, setOnboardData] = useState({ goal:"recomp", activity:"moderate", weight:"" });
 
   const [notifConfig, setNotifConfig] = useState({
     meals: { enabled: true, times: ["08:00","14:00","21:00"] },
@@ -886,10 +887,10 @@ export default function App() {
   const hasAlc = today.drinks.some(d => ["beer","wine","spirits"].includes(d.type));
 
   const g = {
-    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:`linear-gradient(160deg,#080b0f,${(SECTION_COLORS[screen]||SECTION_COLORS.home).bg} 60%,#080b0f)`, fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", transition:"background .4s ease" },
+    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
     wrap:     { maxWidth:440, margin:"0 auto", padding:"0 18px 90px" },
     hdr:      { padding:"28px 0 16px", display:"flex", justifyContent:"space-between", alignItems:"center" },
-    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:(SECTION_COLORS[screen]||SECTION_COLORS.home).primary },
+    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:"#4ade80" },
     dt:       { fontSize:11, color:"rgba(232,245,232,.3)" },
     card:     { background:"rgba(255,255,255,.025)", border:"1px solid rgba(255,255,255,.07)", borderRadius:18, padding:18, marginBottom:12 },
     cardG:    { background:"rgba(74,222,128,.05)", border:"1px solid rgba(74,222,128,.18)", borderRadius:18, padding:18, marginBottom:12 },
@@ -975,12 +976,6 @@ export default function App() {
       <div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Conectando...</div></div>
     </div>
   );
-
-  // Onboarding
-  const [onboardStep, setOnboardStep] = useState(0);
-  const [onboardData, setOnboardData] = useState({ goal:"recomp", activity:"moderate", weight:"" });
-
-  if (!user && userProfile === "skip") {} // already done
 
   const completeOnboarding = () => {
     const macros = calcMacrosFromProfile({ ...onboardData, goal: onboardData.goal });
@@ -1106,7 +1101,6 @@ export default function App() {
         }
       `}</style>
       <div style={g.wrap}>
-        <div style={{opacity: transitioning ? 0 : 1, transform: transitioning ? `translateX(${slideDir * -20}px)` : "translateX(0)", transition:"opacity .18s ease, transform .18s ease"}}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
 <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
@@ -1452,6 +1446,11 @@ export default function App() {
               )}
             </div>
           </div>
+          </div>
+          </div>
+          </div>
+          </div>
+          </div>
         </>}
 
         {screen==="addMeal"&&<>
@@ -1532,6 +1531,8 @@ export default function App() {
           </div>
         </>}
 
+          </div>
+          </div>
         {screen==="addDrink"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
           <div style={{marginTop:6}}>
@@ -1755,6 +1756,8 @@ export default function App() {
 
 
 
+          </div>
+          </div>
         {screen==="achievements"&&<>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>🏆 Logros</div>
           {(()=>{
@@ -2007,6 +2010,10 @@ export default function App() {
         })()}
       </div>
 
+          </div>
+          </div>
+          </div>
+          </div>
       {editingMealId&&(
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
           <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.6)"}} onClick={()=>setEditingMealId(null)}/>
@@ -2051,16 +2058,16 @@ export default function App() {
           </div>
         </div>
       )}
-
-        </div>
-      {showNav&&(
-        <div style={g.nav}>
-          {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
-            <button key={n.id} style={g.nb(screen===n.id)} onClick={()=>setScreen(n.id)}>
-              <span style={{fontSize:20}}>{n.icon}</span>{n.label}
-            </button>))}
-        </div>
-      )}
     </div>
+    {showNav&&(
+      <div style={g.nav}>
+        {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
+          <button key={n.id} style={g.nb(screen===n.id)} onClick={()=>goTo(n.id)}>
+            <span style={{fontSize:20}}>{n.icon}</span>{n.label}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
   );
 }
