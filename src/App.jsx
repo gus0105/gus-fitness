@@ -1,6 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+const SECTION_COLORS = {
+  home:         { primary:"#4ade80", bg:"#091209" },
+  stats:        { primary:"#38bdf8", bg:"#080f12" },
+  achievements: { primary:"#fbbf24", bg:"#0f0e08" },
+  history:      { primary:"#a78bfa", bg:"#0d0a12" },
+  chat:         { primary:"#fb923c", bg:"#12090a" },
+  settings:     { primary:"#94a3b8", bg:"#09090f" },
+  addMeal:      { primary:"#4ade80", bg:"#091209" },
+  addDrink:     { primary:"#38bdf8", bg:"#080f12" },
+  result:       { primary:"#4ade80", bg:"#091209" },
+};
+
 const VAPID_PUBLIC_KEY = "BFwI7qyDop2L5b_qWzhUkN11v9QGwnyKHHSZ0nePV476l63-No51_f0A-J7hBRY-XNV2z4dzp_4Nw7Pmk2XZzEE";
 
 const supabase = createClient(
@@ -175,6 +187,9 @@ function calcStreak(entries) {
 
 export default function App() {
   const [screen, setScreen]       = useState("home");
+  const [transitioning, setTransitioning] = useState(false);
+  const [slideDir, setSlideDir]     = useState(1); // 1=left, -1=right
+  const NAV_ORDER = ["home","stats","achievements","history","chat","settings"];
   const [entries, setEntries]     = useState([]);
   const [today, setTodayRaw]      = useState(EMPTY);
   const [wInput, setWInput]       = useState("");
@@ -210,6 +225,9 @@ export default function App() {
   const [editingSettings, setEditingSettings] = useState(false);
   const [newSupName, setNewSupName] = useState("");
   const [newSupIcon, setNewSupIcon] = useState("💊");
+  const [userProfile, setUserProfile] = useState(null); // onboarding data
+  const [macroGoals, setMacroGoals] = useState({ prot: 147, carb: 193, fat: 70 });
+
   const [notifConfig, setNotifConfig] = useState({
     meals: { enabled: true, times: ["08:00","14:00","21:00"] },
     weight: { enabled: true, time: "07:30" },
@@ -228,6 +246,17 @@ export default function App() {
   const [analyzingPhoto, setAnPh]   = useState(false);
   const fileRef = useRef(null);
   const chatEnd = useRef(null);
+
+  const goTo = (newScreen) => {
+    const oldIdx = NAV_ORDER.indexOf(screen);
+    const newIdx = NAV_ORDER.indexOf(newScreen);
+    setSlideDir(newIdx >= oldIdx ? 1 : -1);
+    setTransitioning(true);
+    setTimeout(() => {
+      setScreen(newScreen);
+      setTransitioning(false);
+    }, 180);
+  };
   const getTodayStr = () => new Date().toISOString().split("T")[0];
   const todayStr = getTodayStr();
 
@@ -240,6 +269,8 @@ export default function App() {
         if (p.kcalGoal) setKcalGoal(p.kcalGoal);
         if (p.supplements) setSupplements(p.supplements);
         if (p.notifConfig) setNotifConfig(p.notifConfig);
+        if (p.userProfile) setUserProfile(p.userProfile);
+        if (p.macroGoals) setMacroGoals(p.macroGoals);
       }
     } catch {}
   }, []);
@@ -249,7 +280,7 @@ export default function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals }));
   };
 
   const signInWithGoogle = async () => {
@@ -470,6 +501,20 @@ export default function App() {
       }
     }).catch(() => {});
   }, [notifConfig]);
+
+  const calcMacrosFromProfile = (profile) => {
+    const { weight, goal, activity } = profile;
+    const w = parseFloat(weight) || 73;
+    const actMult = { sedentary:1.2, light:1.375, moderate:1.55, active:1.725 }[activity] || 1.55;
+    const tdee = Math.round((10*w + 6.25*170 - 5*27 + 5) * actMult);
+    let kcal, prot, fat, carb;
+    if (goal === "recomp") { kcal = tdee; prot = Math.round(w*2); fat = Math.round(w*0.9); }
+    else if (goal === "bulk") { kcal = tdee + 300; prot = Math.round(w*1.8); fat = Math.round(w*1); }
+    else if (goal === "cut") { kcal = tdee - 400; prot = Math.round(w*2.2); fat = Math.round(w*0.8); }
+    else { kcal = tdee; prot = Math.round(w*1.6); fat = Math.round(w*0.9); }
+    carb = Math.round((kcal - prot*4 - fat*9) / 4);
+    return { kcal, prot, fat, carb: Math.max(0, carb) };
+  };
 
   const buildNotifSlots = (config) => {
     const slots = [];
@@ -841,10 +886,10 @@ export default function App() {
   const hasAlc = today.drinks.some(d => ["beer","wine","spirits"].includes(d.type));
 
   const g = {
-    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
+    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:`linear-gradient(160deg,#080b0f,${(SECTION_COLORS[screen]||SECTION_COLORS.home).bg} 60%,#080b0f)`, fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", transition:"background .4s ease" },
     wrap:     { maxWidth:440, margin:"0 auto", padding:"0 18px 90px" },
     hdr:      { padding:"28px 0 16px", display:"flex", justifyContent:"space-between", alignItems:"center" },
-    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:"#4ade80" },
+    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:(SECTION_COLORS[screen]||SECTION_COLORS.home).primary },
     dt:       { fontSize:11, color:"rgba(232,245,232,.3)" },
     card:     { background:"rgba(255,255,255,.025)", border:"1px solid rgba(255,255,255,.07)", borderRadius:18, padding:18, marginBottom:12 },
     cardG:    { background:"rgba(74,222,128,.05)", border:"1px solid rgba(74,222,128,.18)", borderRadius:18, padding:18, marginBottom:12 },
@@ -931,6 +976,24 @@ export default function App() {
     </div>
   );
 
+  // Onboarding
+  const [onboardStep, setOnboardStep] = useState(0);
+  const [onboardData, setOnboardData] = useState({ goal:"recomp", activity:"moderate", weight:"" });
+
+  if (!user && userProfile === "skip") {} // already done
+
+  const completeOnboarding = () => {
+    const macros = calcMacrosFromProfile({ ...onboardData, goal: onboardData.goal });
+    setMacroGoals({ prot: macros.prot, carb: macros.carb, fat: macros.fat });
+    setKcalGoal(macros.kcal);
+    const profile = { ...onboardData, completed: true };
+    setUserProfile(profile);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
+      macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat }
+    }));
+  };
+
   if (!user) return (
     <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -939,14 +1002,95 @@ export default function App() {
           75%, 100% { transform: scale(2); opacity: 0; }
         }
       `}</style>
-      <div style={{ maxWidth:360, width:"100%", padding:"0 24px", textAlign:"center" }}>
-        <div style={{ fontSize:64, marginBottom:16 }}>💪</div>
-        <div style={{ fontSize:28, fontWeight:900, color:"#4ade80", marginBottom:8 }}>Gus Coach</div>
-        <div style={{ fontSize:14, color:"rgba(232,245,232,.45)", marginBottom:48, lineHeight:1.6 }}>Tu coach personal de fitness con IA</div>
-        <button onClick={signInWithGoogle} style={{ width:"100%", padding:"16px", borderRadius:14, border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.06)", color:"#e8f5e8", fontSize:15, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:12 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-          Entrar con Google
-        </button>
+      <div style={{ maxWidth:360, width:"100%", padding:"0 24px" }}>
+        {onboardStep === 0 && <div style={{textAlign:"center"}}>
+          <div style={{ fontSize:64, marginBottom:16 }}>💪</div>
+          <div style={{ fontSize:28, fontWeight:900, color:"#4ade80", marginBottom:8 }}>Gus Coach</div>
+          <div style={{ fontSize:14, color:"rgba(232,245,232,.45)", marginBottom:40, lineHeight:1.6 }}>Tu coach personal de fitness con IA</div>
+          <button onClick={()=>setOnboardStep(1)} style={{ width:"100%", padding:"16px", borderRadius:14, border:"none", background:"linear-gradient(135deg,#4ade80,#22c55e)", color:"#080b0f", fontSize:15, fontWeight:800, cursor:"pointer", marginBottom:12 }}>
+            Empezar →
+          </button>
+          <button onClick={signInWithGoogle} style={{ width:"100%", padding:"14px", borderRadius:14, border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.04)", color:"rgba(232,245,232,.6)", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Ya tengo cuenta — Entrar
+          </button>
+        </div>}
+
+        {onboardStep === 1 && <div>
+          <div style={{fontSize:11,color:"rgba(232,245,232,.3)",marginBottom:8}}>1 de 3</div>
+          <div style={{fontSize:22,fontWeight:900,marginBottom:8}}>¿Cuál es tu objetivo?</div>
+          <div style={{fontSize:13,color:"rgba(232,245,232,.4)",marginBottom:24}}>Esto determinará tus objetivos calóricos y de macros.</div>
+          {[
+            {id:"recomp", icon:"⚖️", label:"Recomposición corporal", desc:"Bajar grasa manteniendo músculo"},
+            {id:"cut",    icon:"🔥", label:"Definición",             desc:"Bajar grasa rápidamente"},
+            {id:"bulk",   icon:"💪", label:"Volumen",                desc:"Ganar masa muscular"},
+            {id:"maintain",icon:"🎯",label:"Mantenimiento",          desc:"Mantener el peso actual"},
+          ].map(o=>(
+            <div key={o.id} onClick={()=>setOnboardData(p=>({...p,goal:o.id}))}
+              style={{padding:"14px 16px",borderRadius:14,border:onboardData.goal===o.id?"1px solid #4ade80":"1px solid rgba(255,255,255,.08)",
+                background:onboardData.goal===o.id?"rgba(74,222,128,.1)":"rgba(255,255,255,.03)",cursor:"pointer",marginBottom:10,
+                display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:24}}>{o.icon}</div>
+              <div><div style={{fontSize:14,fontWeight:700,color:onboardData.goal===o.id?"#4ade80":"#e8f5e8"}}>{o.label}</div>
+              <div style={{fontSize:11,color:"rgba(232,245,232,.4)",marginTop:2}}>{o.desc}</div></div>
+            </div>
+          ))}
+          <button onClick={()=>setOnboardStep(2)} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer",marginTop:8}}>
+            Siguiente →
+          </button>
+        </div>}
+
+        {onboardStep === 2 && <div>
+          <div style={{fontSize:11,color:"rgba(232,245,232,.3)",marginBottom:8}}>2 de 3</div>
+          <div style={{fontSize:22,fontWeight:900,marginBottom:8}}>Nivel de actividad</div>
+          <div style={{fontSize:13,color:"rgba(232,245,232,.4)",marginBottom:24}}>¿Cuántos días a la semana haces ejercicio?</div>
+          {[
+            {id:"sedentary", icon:"🛋️", label:"Sedentario",  desc:"Poco o ningún ejercicio"},
+            {id:"light",     icon:"🚶", label:"Ligero",      desc:"1-3 días/semana"},
+            {id:"moderate",  icon:"🏃", label:"Moderado",   desc:"3-5 días/semana"},
+            {id:"active",    icon:"🏋️", label:"Muy activo", desc:"6-7 días/semana"},
+          ].map(o=>(
+            <div key={o.id} onClick={()=>setOnboardData(p=>({...p,activity:o.id}))}
+              style={{padding:"14px 16px",borderRadius:14,border:onboardData.activity===o.id?"1px solid #4ade80":"1px solid rgba(255,255,255,.08)",
+                background:onboardData.activity===o.id?"rgba(74,222,128,.1)":"rgba(255,255,255,.03)",cursor:"pointer",marginBottom:10,
+                display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:24}}>{o.icon}</div>
+              <div><div style={{fontSize:14,fontWeight:700,color:onboardData.activity===o.id?"#4ade80":"#e8f5e8"}}>{o.label}</div>
+              <div style={{fontSize:11,color:"rgba(232,245,232,.4)",marginTop:2}}>{o.desc}</div></div>
+            </div>
+          ))}
+          <button onClick={()=>setOnboardStep(3)} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer",marginTop:8}}>
+            Siguiente →
+          </button>
+        </div>}
+
+        {onboardStep === 3 && <div>
+          <div style={{fontSize:11,color:"rgba(232,245,232,.3)",marginBottom:8}}>3 de 3</div>
+          <div style={{fontSize:22,fontWeight:900,marginBottom:8}}>Tu peso actual</div>
+          <div style={{fontSize:13,color:"rgba(232,245,232,.4)",marginBottom:24}}>Para calcular tus objetivos de macros.</div>
+          <input type="number" inputMode="decimal" placeholder="ej: 73.3"
+            value={onboardData.weight} onChange={e=>setOnboardData(p=>({...p,weight:e.target.value}))}
+            style={{width:"100%",padding:16,borderRadius:12,border:"1px solid rgba(74,222,128,.3)",background:"rgba(255,255,255,.05)",color:"#e8f5e8",fontSize:18,outline:"none",marginBottom:8,textAlign:"center"}}/>
+          <div style={{fontSize:11,color:"rgba(232,245,232,.3)",textAlign:"center",marginBottom:24}}>kg</div>
+          {onboardData.weight&&(()=>{
+            const m = calcMacrosFromProfile({...onboardData});
+            return <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.2)",borderRadius:14,padding:16,marginBottom:20}}>
+              <div style={{fontSize:11,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:12}}>Tus objetivos calculados</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[["🔥 Calorías",m.kcal,"kcal"],["🥩 Proteína",m.prot,"g"],["🍚 Carbos",m.carb,"g"],["🧈 Grasas",m.fat,"g"]].map(([l,v,u])=>(
+                  <div key={l} style={{textAlign:"center",padding:"10px 8px",background:"rgba(255,255,255,.04)",borderRadius:10}}>
+                    <div style={{fontSize:18,fontWeight:900,color:"#4ade80"}}>{v}<span style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>{u}</span></div>
+                    <div style={{fontSize:10,color:"rgba(232,245,232,.4)",marginTop:3}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+            </div>;
+          })()}
+          <button onClick={()=>{ completeOnboarding(); signInWithGoogle(); }}
+            style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer"}}>
+            Empezar con Google →
+          </button>
+        </div>}
       </div>
     </div>
   );
@@ -961,7 +1105,8 @@ export default function App() {
           75%, 100% { transform: scale(2); opacity: 0; }
         }
       `}</style>
-      <div style={g.wrap}>
+      <div style={{overflow:"hidden"}}>
+      <div style={{...g.wrap, transform: transitioning ? `translateX(${slideDir * -30}px)` : "translateX(0)", opacity: transitioning ? 0 : 1, transition:"transform .18s ease, opacity .18s ease"}}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
 <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
@@ -1130,6 +1275,32 @@ export default function App() {
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{pct}% del objetivo</span>
                   <span style={{fontSize:10,color:"rgba(232,245,232,.3)"}}>{Math.max(0,kcalGoal-totalKcal)} restantes</span>
                 </div>
+
+                {/* Macro bars */}
+                {(()=>{
+                  const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
+                  const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
+                  const totalFat  = today.meals.reduce((s,m)=>s+(m.fat||0),0);
+                  if (!totalProt && !totalCarb && !totalFat) return null;
+                  return <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+                    {[
+                      {label:"Proteína",val:totalProt,goal:macroGoals.prot,color:"#4ade80"},
+                      {label:"Carbos",  val:totalCarb,goal:macroGoals.carb,color:"#38bdf8"},
+                      {label:"Grasas",  val:totalFat, goal:macroGoals.fat, color:"#fb923c"},
+                    ].map(({label,val,goal,color})=>{
+                      const p=Math.min(100,Math.round((val/goal)*100));
+                      return <div key={label}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:10,color:"rgba(232,245,232,.5)"}}>{label}</span>
+                          <span style={{fontSize:10,fontWeight:700,color}}>{Math.round(val)}<span style={{color:"rgba(232,245,232,.3)",fontWeight:400}}>/{goal}g</span></span>
+                        </div>
+                        <div style={{background:"rgba(255,255,255,.06)",borderRadius:99,height:6}}>
+                          <div style={{height:"100%",borderRadius:99,background:color,width:`${p}%`,transition:"width .5s ease"}}/>
+                        </div>
+                      </div>;
+                    })}
+                  </div>;
+                })()}
               </div>
             ) : null;
           })()}
@@ -1881,6 +2052,7 @@ export default function App() {
         </div>
       )}
 
+      </div></div>
       {showNav&&(
         <div style={g.nav}>
           {[{id:"home",icon:"🏠",label:"Inicio"},{id:"stats",icon:"📊",label:"Stats"},{id:"achievements",icon:"🏆",label:"Logros"},{id:"history",icon:"📋",label:"Historial"},{id:"chat",icon:"💬",label:"Coach"},{id:"settings",icon:"⚙️",label:"Ajustes"}].map(n=>(
