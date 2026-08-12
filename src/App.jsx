@@ -1380,6 +1380,8 @@ export default function App() {
           </div>
           </div>
           </div>
+          </div>
+          </div>
         </>}
 
         {screen==="addMeal"&&<>
@@ -1985,8 +1987,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
-    </div>
     </div>
     </div>
     {showNav&&(
