@@ -216,6 +216,7 @@ export default function App() {
   const [activeTip, setActiveTip] = useState(null);
   const [editingMealId, setEditingMealId] = useState(null);
   const [editingMealTime, setEditingMealTime] = useState("");
+  const [editingMealSlot, setEditingMealSlot] = useState("lunch");
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -228,6 +229,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState(null);
   const [macroGoals, setMacroGoals] = useState({ prot: 147, carb: 193, fat: 70 });
   const [onboardStep, setOnboardStep] = useState(0);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [onboardData, setOnboardData] = useState({ goal:"recomp", activity:"moderate", weight:"" });
 
   const [notifConfig, setNotifConfig] = useState({
@@ -248,6 +250,30 @@ export default function App() {
   const [analyzingPhoto, setAnPh]   = useState(false);
   const fileRef = useRef(null);
   const chatEnd = useRef(null);
+
+  const touchRef = useRef(null);
+
+  const onTouchStart = (e) => {
+    const t = e.touches[0];
+    touchRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+  };
+
+  const onTouchEnd = (e) => {
+    const s = touchRef.current;
+    if (!s) return;
+    touchRef.current = null;
+    if (!NAV_ORDER.includes(screen)) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    // Solo swipe horizontal claro y rapido
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (Date.now() - s.t > 600) return;
+    const idx = NAV_ORDER.indexOf(screen);
+    const next = dx < 0 ? idx + 1 : idx - 1;
+    if (next < 0 || next >= NAV_ORDER.length) return;
+    goTo(NAV_ORDER[next]);
+  };
 
   const goTo = (newScreen) => {
     const oldIdx = NAV_ORDER.indexOf(screen);
@@ -275,6 +301,7 @@ export default function App() {
         if (p.macroGoals) setMacroGoals(p.macroGoals);
       }
     } catch {}
+    setSettingsLoaded(true);
   }, []);
 
   const saveSettings = (newKcal, newSupps) => {
@@ -283,6 +310,13 @@ export default function App() {
     setKcalGoal(k);
     setSupplements(s);
     localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals }));
+  };
+
+  const saveNotifConfig = (next) => {
+    setNotifConfig(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals
+    }));
   };
 
   const signInWithGoogle = async () => {
@@ -651,8 +685,8 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const updateMealTime = (id, newTime) => {
-    const updated = today.meals.map(m => m.id === id ? {...m, time: newTime} : m);
+  const updateMeal = (id, newTime, newSlot) => {
+    const updated = today.meals.map(m => m.id === id ? {...m, time: newTime, slot: newSlot} : m);
     setT({ meals: updated });
     setEditingMealId(null);
   };
@@ -887,11 +921,13 @@ export default function App() {
   const waterL = today.drinks.filter(d => d.type === "water" && d.unit === "ml").reduce((s, d) => s + parseFloat(d.amount || 0), 0) / 1000;
   const hasAlc = today.drinks.some(d => ["beer","wine","spirits"].includes(d.type));
 
+  const sc = SECTION_COLORS[screen] || SECTION_COLORS.home;
+
   const g = {
-    page:     { minHeight:"100vh", WebkitMinHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
+    page:     { minHeight:"100vh", background:`linear-gradient(160deg,#080b0f,${sc.bg} 60%,#080b0f)`, transition:"background .45s ease", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8" },
     wrap:     { maxWidth:440, margin:"0 auto", padding:"0 18px 90px" },
     hdr:      { padding:"28px 0 16px", display:"flex", justifyContent:"space-between", alignItems:"center" },
-    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:"#4ade80" },
+    logo:     { fontSize:11, fontWeight:800, letterSpacing:".3em", textTransform:"uppercase", color:sc.primary, transition:"color .45s ease" },
     dt:       { fontSize:11, color:"rgba(232,245,232,.3)" },
     card:     { background:"rgba(255,255,255,.025)", border:"1px solid rgba(255,255,255,.07)", borderRadius:18, padding:18, marginBottom:12 },
     cardG:    { background:"rgba(74,222,128,.05)", border:"1px solid rgba(74,222,128,.18)", borderRadius:18, padding:18, marginBottom:12 },
@@ -912,8 +948,8 @@ export default function App() {
     chart:    { height:68, display:"flex", alignItems:"flex-end", gap:3 },
     bar:      (h,t) => ({ flex:1, borderRadius:"3px 3px 0 0", minWidth:0, height:`${h}%`, background: t?"linear-gradient(180deg,#4ade80,#22c55e)":"rgba(74,222,128,.35)", transition:"height .3s ease" }),
     nav:      { position:"fixed", bottom:0, left:0, right:0, background:"rgba(8,11,15,.97)", borderTop:"1px solid rgba(255,255,255,.07)", display:"flex", justifyContent:"space-around", padding:"10px 0 18px", zIndex:100 },
-    nb:       (a) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:2, background:"none", border:"none", color: a?"#4ade80":"rgba(232,245,232,.28)", cursor:"pointer", padding:"3px 16px", fontSize:9, fontWeight:600 }),
-    chatWrap: { display:"flex", flexDirection:"column", height:"calc(100vh - 110px)", height:"calc(-webkit-fill-available - 110px)" },
+    nb:       (a) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:2, background:"none", border:"none", color: a?sc.primary:"rgba(232,245,232,.28)", cursor:"pointer", padding:"3px 16px", fontSize:9, fontWeight:600 }),
+    chatWrap: { display:"flex", flexDirection:"column", height:"calc(100vh - 110px)" },
     chatScr:  { flex:1, overflowY:"auto", display:"flex", flexDirection:"column", paddingBottom:6 },
     bub:      (u) => ({ maxWidth:"85%", padding:"11px 15px", marginBottom:8, fontSize:13, lineHeight:1.65, borderRadius: u?"16px 16px 3px 16px":"16px 16px 16px 3px", background: u?"linear-gradient(135deg,#4ade80,#22c55e)":"rgba(255,255,255,.06)", color: u?"#080b0f":"#e8f5e8", border: u?"none":"1px solid rgba(255,255,255,.08)", alignSelf: u?"flex-end":"flex-start" }),
     chatRow:  { display:"flex", gap:8, paddingTop:10, borderTop:"1px solid rgba(255,255,255,.07)" },
@@ -972,7 +1008,7 @@ export default function App() {
     </>;
   };
 
-  if (!ready && !user) return (
+  if (!settingsLoaded || (!ready && !user)) return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209)", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ textAlign:"center" }}><div style={{ fontSize:32, marginBottom:10 }}>⚡</div><div style={{ color:"#4ade80", fontSize:13 }}>Conectando...</div></div>
     </div>
@@ -990,8 +1026,8 @@ export default function App() {
     }));
   };
 
-  if (!user) return (
-    <div style={{ minHeight:"100vh", minHeight:"-webkit-fill-available", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
+  if (!user || !userProfile?.completed) return (
+    <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#080b0f,#091209 60%,#080b0f)", fontFamily:"'DM Sans',sans-serif", color:"#e8f5e8", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
       <style>{`
         @keyframes ping {
@@ -1006,10 +1042,10 @@ export default function App() {
           <button onClick={()=>setOnboardStep(1)} style={{ width:"100%", padding:"16px", borderRadius:14, border:"none", background:"linear-gradient(135deg,#4ade80,#22c55e)", color:"#080b0f", fontSize:15, fontWeight:800, cursor:"pointer", marginBottom:12 }}>
             Empezar →
           </button>
-          <button onClick={signInWithGoogle} style={{ width:"100%", padding:"14px", borderRadius:14, border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.04)", color:"rgba(232,245,232,.6)", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+          {!user && <button onClick={signInWithGoogle} style={{ width:"100%", padding:"14px", borderRadius:14, border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.04)", color:"rgba(232,245,232,.6)", fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
             <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
             Ya tengo cuenta — Entrar
-          </button>
+          </button>}
         </div>}
 
         {onboardStep === 1 && <div>
@@ -1082,7 +1118,7 @@ export default function App() {
               </div>
             </div>;
           })()}
-          <button onClick={()=>{ completeOnboarding(); signInWithGoogle(); }}
+          <button onClick={()=>{ completeOnboarding(); if (!user) signInWithGoogle(); }}
             style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer"}}>
             Empezar con Google →
           </button>
@@ -1101,11 +1137,17 @@ export default function App() {
           75%, 100% { transform: scale(2); opacity: 0; }
         }
       `}</style>
-      <div style={g.wrap}>
+      <div style={g.wrap} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div style={g.hdr}>
           <span style={g.logo}>Gus Coach</span>
 <span style={g.dt}>{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>
         </div>
+
+        <div style={{
+          opacity: transitioning ? 0 : 1,
+          transform: transitioning ? `translateX(${slideDir * -28}px)` : "translateX(0)",
+          transition: "opacity .18s ease, transform .18s ease"
+        }}>
 
         {screen==="home" && <>
           <div style={g.g3}>
@@ -1153,7 +1195,8 @@ export default function App() {
               :today.meals.map(m=>{const sl=MEALS.find(x=>x.id===m.slot);return(
               <div key={m.id} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.05)"}}>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:10,color:"#4ade80",fontWeight:700,marginBottom:2}}>{sl?.icon} {sl?.label} · <span onClick={()=>{setEditingMealId(m.id);setEditingMealTime(m.time||"12:00");}} style={{cursor:"pointer",borderBottom:"1px dotted rgba(74,222,128,.5)",paddingBottom:1}}>{m.time} ✏️</span></div>
+                  <div onClick={()=>{setEditingMealId(m.id);setEditingMealTime(m.time||"12:00");setEditingMealSlot(m.slot||"other");}}
+                    style={{fontSize:10,color:"#4ade80",fontWeight:700,marginBottom:2,cursor:"pointer",display:"inline-block",borderBottom:"1px dotted rgba(74,222,128,.5)",paddingBottom:1}}>{sl?.icon} {sl?.label} · {m.time} ✏️</div>
                   <div style={{fontSize:12,color:"rgba(232,245,232,.65)",lineHeight:1.4}}>{m.desc}</div>
                   {(m.prot||m.carb||m.fat)&&<div style={{fontSize:10,color:"rgba(74,222,128,.5)",marginTop:3}}>{m.prot?`P:${m.prot}g `:""}{m.carb?`C:${m.carb}g `:""}{m.fat?`G:${m.fat}g`:""}</div>}
                 </div>
@@ -1215,7 +1258,7 @@ export default function App() {
             const totalKcal = today.meals.reduce((s,m)=>s+(m.kcal||0),0);
             const pct = Math.min(100, Math.round((totalKcal/kcalGoal)*100));
             const mealsWithKcal = today.meals.filter(m=>m.kcal>0);
-            const SLOT_COLORS = { breakfast:"#fb923c", morning_snack:"#fbbf24", lunch:"#4ade80", afternoon_snack:"#38bdf8", dinner:"#a78bfa", other:"#94a3b8" };
+            const SLOT_COLORS = { breakfast:"#fb923c", midmorning:"#fbbf24", lunch:"#4ade80", snack:"#38bdf8", dinner:"#a78bfa", other:"#94a3b8" };
             return totalKcal>0||kcalGoal>0 ? (
               <div style={g.card}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1368,7 +1411,7 @@ export default function App() {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={g.sec}>🔔 Notificaciones</div>
-                <div style={{fontSize:12,color:"rgba(232,245,232,.4)"}}>Configura en Ajustes</div>
+                <div onClick={()=>goTo("settings")} style={{fontSize:12,color:"rgba(232,245,232,.4)",cursor:"pointer",textDecoration:"underline"}}>Configura en Ajustes</div>
               </div>
               {typeof Notification!=="undefined"&&Notification.permission!=="granted"&&(
                 <button onClick={requestNotifications} style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
@@ -1774,6 +1817,69 @@ export default function App() {
           </div>
 
           <div style={g.card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={g.sec}>🔔 Notificaciones</div>
+              {typeof Notification!=="undefined" && Notification.permission!=="granted" && (
+                <button onClick={requestNotifications}
+                  style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",borderRadius:9,color:"#4ade80",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer"}}>
+                  Dar permiso
+                </button>
+              )}
+            </div>
+
+            {[
+              {key:"weight",      icon:"⚖️", label:"Peso diario",   multi:false},
+              {key:"meals",       icon:"🍽️", label:"Comidas",       multi:true},
+              {key:"supplements", icon:"💊", label:"Suplementos",   multi:false},
+              {key:"motivational",icon:"⚡", label:"Motivación",    multi:false},
+            ].map(({key,icon,label,multi})=>{
+              const cfg = notifConfig[key] || {};
+              return (
+                <div key={key} style={{padding:"12px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:13,fontWeight:600}}>{icon} {label}</span>
+                    <button onClick={()=>saveNotifConfig({...notifConfig,[key]:{...cfg,enabled:!cfg.enabled}})}
+                      style={{width:44,height:24,borderRadius:99,border:"none",cursor:"pointer",padding:2,
+                        background: cfg.enabled ? "linear-gradient(135deg,#4ade80,#22c55e)" : "rgba(255,255,255,.12)",
+                        display:"flex",justifyContent: cfg.enabled ? "flex-end" : "flex-start",transition:"all .2s"}}>
+                      <span style={{width:20,height:20,borderRadius:"50%",background:"#fff",display:"block"}}/>
+                    </button>
+                  </div>
+
+                  {cfg.enabled && !multi && (
+                    <input type="time" value={cfg.time||"09:00"}
+                      onChange={e=>saveNotifConfig({...notifConfig,[key]:{...cfg,time:e.target.value}})}
+                      style={{...g.inp,marginTop:10,marginBottom:0,width:"auto",padding:"8px 10px",fontSize:13,colorScheme:"dark"}}/>
+                  )}
+
+                  {cfg.enabled && multi && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:10,alignItems:"center"}}>
+                      {(cfg.times||[]).map((t,i)=>(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:4}}>
+                          <input type="time" value={t}
+                            onChange={e=>{
+                              const times=[...cfg.times]; times[i]=e.target.value;
+                              saveNotifConfig({...notifConfig,[key]:{...cfg,times}});
+                            }}
+                            style={{...g.inp,marginBottom:0,width:"auto",padding:"8px 10px",fontSize:13,colorScheme:"dark"}}/>
+                          <button onClick={()=>saveNotifConfig({...notifConfig,[key]:{...cfg,times:cfg.times.filter((_,j)=>j!==i)}})}
+                            style={{background:"none",border:"none",color:"#f87171",fontSize:15,cursor:"pointer",padding:"0 2px"}}>×</button>
+                        </div>
+                      ))}
+                      <button onClick={()=>saveNotifConfig({...notifConfig,[key]:{...cfg,times:[...(cfg.times||[]),"12:00"]}})}
+                        style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.25)",borderRadius:9,color:"#4ade80",fontSize:12,padding:"7px 10px",cursor:"pointer"}}>+ Hora</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={{fontSize:11,color:"rgba(232,245,232,.3)",marginTop:12}}>
+              Los avisos se programan en el service worker. Si cierras la app del todo, iOS puede retrasarlos.
+            </div>
+          </div>
+
+          <div style={g.card}>
             <div style={g.sec}>👤 Cuenta</div>
             <div style={{fontSize:13,color:"rgba(232,245,232,.5)",marginBottom:14}}>{user?.email}</div>
             <button style={{...g.btnS,marginBottom:0,borderColor:"rgba(248,113,113,.2)",color:"#f87171"}} onClick={signOut}>Cerrar sesión</button>
@@ -1927,16 +2033,32 @@ export default function App() {
             }
           </>;
         })()}
+        </div>
       </div>
 
       {editingMealId&&(
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
           <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.6)"}} onClick={()=>setEditingMealId(null)}/>
           <div style={{position:"relative",background:"#0f1a0f",borderRadius:"20px 20px 0 0",padding:"24px 24px 40px",border:"1px solid rgba(74,222,128,.2)"}}>
-            <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>✏️ Editar hora</div>
+            <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>✏️ Editar comida</div>
             <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:20}}>
               {today.meals.find(m=>m.id===editingMealId)?.desc?.slice(0,50)}
             </div>
+
+            <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:8}}>Momento del día</div>
+            <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:22}}>
+              {MEALS.map(mo=>(
+                <button key={mo.id} onClick={()=>setEditingMealSlot(mo.id)}
+                  style={{padding:"8px 12px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:editingMealSlot===mo.id?700:400,
+                    border:editingMealSlot===mo.id?"1px solid #4ade80":"1px solid rgba(255,255,255,.08)",
+                    background:editingMealSlot===mo.id?"rgba(74,222,128,.15)":"rgba(255,255,255,.03)",
+                    color:editingMealSlot===mo.id?"#4ade80":"rgba(232,245,232,.45)"}}>
+                  {mo.icon} {mo.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{fontSize:9,color:"rgba(74,222,128,.55)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:8}}>Hora</div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:24}}>
               <button onClick={()=>{
                 const [h,m]=editingMealTime.split(":").map(Number);
@@ -1965,7 +2087,7 @@ export default function App() {
                 style={{flex:1,padding:"14px",borderRadius:14,border:"1px solid rgba(255,255,255,.1)",background:"rgba(255,255,255,.04)",color:"rgba(232,245,232,.5)",fontSize:14,cursor:"pointer"}}>
                 Cancelar
               </button>
-              <button onClick={()=>updateMealTime(editingMealId,editingMealTime)}
+              <button onClick={()=>updateMeal(editingMealId,editingMealTime,editingMealSlot)}
                 style={{flex:2,padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#080b0f",fontSize:14,fontWeight:800,cursor:"pointer"}}>
                 Guardar ✓
               </button>
