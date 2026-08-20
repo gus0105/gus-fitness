@@ -95,7 +95,7 @@ function nowTime() {
   return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
-const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], suppsTaken: [], kcal: 0 };
+const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], exercises: [], suppsTaken: [], kcal: 0 };
 
 // Adjunta el token de sesión de Supabase en toda llamada a /api,
 // para que el backend pueda verificar quién hace la petición
@@ -177,7 +177,7 @@ function calcStreak(entries) {
   let streak = 0;
   let current = today;
   for (const e of sorted) {
-    const hasData = e.today?.weight || e.today?.meals?.length || e.today?.training || e.today?.muscleGroups?.length;
+    const hasData = e.today?.weight || e.today?.meals?.length || e.today?.training || e.today?.muscleGroups?.length || e.today?.exercises?.length;
     if (e.date === current && hasData) {
       streak++;
       const d = new Date(current);
@@ -269,6 +269,9 @@ function App() {
   const [editingMealId, setEditingMealId] = useState(null);
   const [editingMealTime, setEditingMealTime] = useState("");
   const [editingMealSlot, setEditingMealSlot] = useState("lunch");
+  const [exName, setExName]       = useState("");
+  const [exSets, setExSets]       = useState([{ weight:"", reps:"" }]);
+  const [editingExerciseId, setEditingExerciseId] = useState(null);
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -536,7 +539,7 @@ function App() {
       } else if (document.visibilityState === "hidden" && userRef.current?.id) {
         // Force save current state when app goes to background
         const t = todayRef.current;
-        if (t && (t.weight || t.meals?.length || t.drinks?.length || t.training)) {
+        if (t && (t.weight || t.meals?.length || t.drinks?.length || t.training || t.exercises?.length)) {
           supabase.from("entries").upsert({
             user_id: userRef.current.id,
             date: getTodayStr(),
@@ -878,6 +881,58 @@ function App() {
     setDrinkAmt(""); setScreen("home");
   };
 
+  const openAddExercise = () => {
+    setEditingExerciseId(null);
+    setExName("");
+    setExSets([{ weight:"", reps:"" }]);
+    setScreen("addExercise");
+  };
+
+  const openEditExercise = (ex) => {
+    setEditingExerciseId(ex.id);
+    setExName(ex.name);
+    setExSets(ex.sets?.length ? ex.sets.map(s=>({ weight: s.weight??"", reps: s.reps??"" })) : [{ weight:"", reps:"" }]);
+    setScreen("addExercise");
+  };
+
+  const addExerciseSet = () => {
+    setExSets(prev => {
+      const last = prev[prev.length-1];
+      return [...prev, { weight: last?.weight ?? "", reps: last?.reps ?? "" }]; // repite el peso/reps de la última serie como punto de partida
+    });
+  };
+
+  const removeExerciseSet = (idx) => {
+    setExSets(prev => prev.length>1 ? prev.filter((_,i)=>i!==idx) : prev);
+  };
+
+  const updateExerciseSet = (idx, field, value) => {
+    setExSets(prev => prev.map((s,i)=> i===idx ? { ...s, [field]: value } : s));
+  };
+
+  const saveExercise = () => {
+    const name = exName.trim();
+    if (!name) return;
+    const cleanSets = exSets
+      .map(s => ({
+        weight: s.weight!=="" ? parseFloat(s.weight) : "",
+        reps: s.reps!=="" ? parseInt(s.reps, 10) : "",
+      }))
+      .filter(s => s.weight!=="" || s.reps!=="");
+    if (!cleanSets.length) return;
+    const list = today.exercises || [];
+    const newList = editingExerciseId
+      ? list.map(x => x.id===editingExerciseId ? { ...x, name, sets: cleanSets } : x)
+      : [...list, { id: Date.now(), name, sets: cleanSets }];
+    setT({ exercises: newList });
+    setEditingExerciseId(null); setExName(""); setExSets([{ weight:"", reps:"" }]);
+    setScreen("home");
+  };
+
+  const removeExercise = (id) => {
+    setT({ exercises: (today.exercises||[]).filter(x=>x.id!==id) });
+  };
+
   const buildContext = () => {
     const mealTxt = today.meals.length
       ? today.meals.map(m => { const macros = [m.prot?`P:${m.prot}g`:"",m.carb?`C:${m.carb}g`:"",m.fat?`G:${m.fat}g`:"",m.kcal?`${m.kcal}kcal`:""].filter(Boolean).join(" "); return `- ${MEALS.find(x=>x.id===m.slot)?.label} (${m.time}): ${m.desc}${macros?" ["+macros+"]":""}`; }).join("\n")
@@ -889,7 +944,11 @@ function App() {
     const muscleTxt = muscleGroups.length
       ? muscleGroups.map(id=>MUSCLE_GROUPS.find(m=>m.id===id)?.label||id).join(", ")
       : today.training || "ninguno";
-    return { mealTxt, drinkTxt, muscleTxt };
+    const exercises = today.exercises||[];
+    const exerciseTxt = exercises.length
+      ? exercises.map(ex => `- ${ex.name}: ${ex.sets.map(s=>`${s.weight||"?"}kg×${s.reps||"?"}`).join(", ")}`).join("\n")
+      : "Sin ejercicios registrados";
+    return { mealTxt, drinkTxt, muscleTxt, exerciseTxt };
   };
 
   const saveAnalysis = async (text, type, newAnalyses) => {
@@ -912,9 +971,9 @@ function App() {
 
   const analyzeNow = async () => {
     setLoading(true); setAiText(""); setScreen("result");
-    const { mealTxt, drinkTxt, muscleTxt } = buildContext();
+    const { mealTxt, drinkTxt, muscleTxt, exerciseTxt } = buildContext();
     const totalKcalNow = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
+    const prompt = `Análisis rápido (${nowTime()}, ${new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}\nCALORÍAS: ${totalKcalNow}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS HASTA AHORA:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nEJERCICIOS:\n${exerciseTxt}\nDame feedback breve sobre lo que llevo hasta ahora, incluyendo si voy bien con las calorías.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -930,9 +989,9 @@ function App() {
 
   const analyzeDay = async () => {
     setLoading(true); setAiText(""); setScreen("result");
-    const { mealTxt, drinkTxt, muscleTxt } = buildContext();
+    const { mealTxt, drinkTxt, muscleTxt, exerciseTxt } = buildContext();
     const totalKcalDay = todayRef.current.meals.reduce((s,m)=>s+(m.kcal||0),0);
-    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}${todayRef.current.imc ? " | IMC: "+todayRef.current.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
+    const prompt = `Resumen final del día (${new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}):\nPESO: ${todayRef.current.weight || "no registrado"}kg${todayRef.current.grasa ? " | Grasa: "+todayRef.current.grasa+"%" : ""}${todayRef.current.imc ? " | IMC: "+todayRef.current.imc : ""}\nCALORÍAS TOTALES: ${totalKcalDay}kcal de ${kcalGoal}kcal objetivo\nCOMIDAS:\n${mealTxt}\nBEBIDAS:\n${drinkTxt}\nGRUPOS MUSCULARES: ${muscleTxt}${todayRef.current.training?" | Notas: "+todayRef.current.training:""}\nEJERCICIOS:\n${exerciseTxt}\nEste es el resumen completo del día. Dame un análisis detallado incluyendo valoración calórica y un ajuste concreto para mañana.`;
     try {
       const text = await callClaude(prompt);
       setAiText(text);
@@ -951,7 +1010,7 @@ function App() {
     const text = chatIn.trim(); setChatIn("");
     const next = [...msgs, { role: "user", content: text }];
     setMsgs(next); setChatBusy(true);
-    const ctx = entries.slice(-5).map(e => `${e.date}: ${e.today?.weight || "?"}kg | ${e.today?.meals?.length || 0} comidas | ${e.today?.training || "-"}`).join("\n");
+    const ctx = entries.slice(-5).map(e => `${e.date}: ${e.today?.weight || "?"}kg | ${e.today?.meals?.length || 0} comidas | ${(e.today?.exercises||[]).map(x=>x.name).join(", ") || e.today?.training || "-"}`).join("\n");
     try {
       const reply = await callClaude((ctx ? `Contexto reciente:\n${ctx}\n\n` : "") + text);
       setMsgs([...next, { role: "assistant", content: reply }]);
@@ -970,6 +1029,13 @@ function App() {
   const wDiff = today.weight && prevW ? (parseFloat(today.weight) - parseFloat(prevW)).toFixed(1) : null;
   const waterL = today.drinks.filter(d => d.type === "water" && d.unit === "ml").reduce((s, d) => s + parseFloat(d.amount || 0), 0) / 1000;
   const hasAlc = today.drinks.some(d => ["beer","wine","spirits"].includes(d.type));
+  const exerciseHistory = [...new Set(
+    entries.flatMap(e => (e.today?.exercises||[]).map(x=>x.name))
+      .concat((today.exercises||[]).map(x=>x.name))
+  )];
+  const exerciseSuggestions = exName.trim()
+    ? exerciseHistory.filter(n => n.toLowerCase().includes(exName.trim().toLowerCase()) && n.toLowerCase()!==exName.trim().toLowerCase()).slice(0,6)
+    : [];
 
   const sc = SECTION_COLORS[screen] || SECTION_COLORS.home;
 
@@ -1298,7 +1364,28 @@ function App() {
                 </div>
               </div>
             ))}
-            <input style={{...g.inp,marginBottom:0,marginTop:4,fontSize:12}} placeholder="Notas adicionales (series, peso...)"
+
+            <div style={{marginTop:6,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:9,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",color:"rgba(232,245,232,.3)"}}>Ejercicios</div>
+                <button style={g.addBtn} onClick={openAddExercise}>+ Añadir</button>
+              </div>
+              {(today.exercises||[]).length===0
+                ? <div style={{fontSize:12,color:"rgba(232,245,232,.25)"}}>Sin ejercicios registrados hoy</div>
+                : (today.exercises||[]).map(ex=>(
+                  <div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.05)"}}>
+                    <div style={{cursor:"pointer",flex:1}} onClick={()=>openEditExercise(ex)}>
+                      <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
+                      <div style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>
+                        {ex.sets.length} {ex.sets.length===1?"serie":"series"} · {ex.sets.map(s=>`${s.weight||"-"}kg×${s.reps||"-"}`).join(", ")}
+                      </div>
+                    </div>
+                    <button style={g.rm} onClick={()=>removeExercise(ex.id)}>×</button>
+                  </div>
+                ))}
+            </div>
+
+            <input style={{...g.inp,marginBottom:0,fontSize:12}} placeholder="Notas adicionales"
               value={today.training}
               onChange={e=>{ const v=e.target.value; setTodayRaw(p=>({...p,training:v})); todayRef.current={...todayRef.current,training:v}; }}
               onBlur={e=>persist(null,{...todayRef.current,training:e.target.value})}/>
@@ -1572,6 +1659,40 @@ function App() {
           </div>
         </>}
 
+        {screen==="addExercise"&&<>
+          <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
+          <div style={{marginTop:6}}>
+            <div style={{fontSize:18,fontWeight:900,marginBottom:20}}>💪 {editingExerciseId?"Editar":"Añadir"} ejercicio</div>
+            <label style={g.lbl}>Ejercicio</label>
+            <input style={g.inp} placeholder="ej: Press banca" value={exName} onChange={e=>setExName(e.target.value)}/>
+            {exerciseSuggestions.length>0&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:-6,marginBottom:16}}>
+                {exerciseSuggestions.map(n=>(
+                  <button key={n} onClick={()=>setExName(n)} style={g.chip(false)}>{n}</button>
+                ))}
+              </div>
+            )}
+            <label style={g.lbl}>Series</label>
+            {exSets.map((s,i)=>(
+              <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                <div style={{width:18,fontSize:11,color:"rgba(232,245,232,.35)",flexShrink:0,textAlign:"center"}}>{i+1}</div>
+                <div style={{flex:1,display:"flex",alignItems:"center",gap:4}}>
+                  <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="peso"
+                    value={s.weight} onChange={e=>updateExerciseSet(i,"weight",e.target.value)}/>
+                  <span style={{color:"rgba(232,245,232,.35)",fontSize:11}}>kg</span>
+                </div>
+                <div style={{flex:1,display:"flex",alignItems:"center",gap:4}}>
+                  <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="numeric" placeholder="reps"
+                    value={s.reps} onChange={e=>updateExerciseSet(i,"reps",e.target.value)}/>
+                </div>
+                {exSets.length>1&&<button style={g.rm} onClick={()=>removeExerciseSet(i)}>×</button>}
+              </div>
+            ))}
+            <button style={{...g.btnS,marginTop:4}} onClick={addExerciseSet}>+ Añadir serie</button>
+            <button style={g.btnP} onClick={saveExercise}>Guardar ejercicio ✓</button>
+          </div>
+        </>}
+
         {screen==="result"&&<>
           <button style={g.back} onClick={()=>{
             if(window.speechSynthesis) window.speechSynthesis.cancel();
@@ -1774,7 +1895,7 @@ function App() {
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>🏆 Logros</div>
           {(()=>{
             const streak = calcStreak(entries);
-            const totalDays = entries.filter(e=>e.today?.weight||e.today?.meals?.length||e.today?.training||e.today?.muscleGroups?.length).length;
+            const totalDays = entries.filter(e=>e.today?.weight||e.today?.meals?.length||e.today?.training||e.today?.muscleGroups?.length||e.today?.exercises?.length).length;
 
             return <>
               <div style={g.card}>
@@ -1987,7 +2108,7 @@ function App() {
                 const dateStr = `${calYear}-${pad(calMonth+1)}-${pad(day)}`;
                 const entry = entryMap[dateStr];
                 const hasWeight = !!(entry?.today?.weight);
-                const hasTraining = !!(entry?.today?.training) || !!(entry?.today?.muscleGroups?.length);
+                const hasTraining = !!(entry?.today?.training) || !!(entry?.today?.muscleGroups?.length) || !!(entry?.today?.exercises?.length);
                 const hasMeals = !!(entry?.today?.meals?.length);
                 const isToday = dateStr === todayStr;
                 const isSel = selDay === day;
@@ -2021,7 +2142,14 @@ function App() {
                     {selEntry.today?.grasa&&<div><div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>Grasa</div><div style={{fontSize:18,fontWeight:800,color:"#fb923c"}}>{selEntry.today.grasa}%</div></div>}
                     {selEntry.today?.imc&&<div><div style={{fontSize:9,color:"rgba(74,222,128,.6)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>IMC</div><div style={{fontSize:18,fontWeight:800,color:"rgba(232,245,232,.7)"}}>{selEntry.today.imc}</div></div>}
                   </div>
-                  {selEntry.today?.training&&<div style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:8}}>💪 {selEntry.today.training}</div>}
+                  {selEntry.today?.exercises?.length>0&&<div style={{marginBottom:8}}>
+                    {selEntry.today.exercises.map((ex,i)=>(
+                      <div key={i} style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:2}}>
+                        💪 {ex.name}: {ex.sets.map(s=>`${s.weight||"-"}kg×${s.reps||"-"}`).join(", ")}
+                      </div>
+                    ))}
+                  </div>}
+                  {selEntry.today?.training&&<div style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:8}}>📝 {selEntry.today.training}</div>}
                   {selEntry.today?.meals?.length>0&&<div>
                     {selEntry.today.meals.map((m,i)=>{
                       const sl=MEALS.find(x=>x.id===m.slot);
@@ -2065,7 +2193,7 @@ function App() {
                                 <div>
                                   <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{new Date(e.date+"T12:00:00").toLocaleDateString("es-ES",{weekday:"short",day:"numeric"})}</div>
                                   <div style={{fontSize:10,color:"rgba(232,245,232,.3)",lineHeight:1.5}}>
-                                    {e.today?.meals?.length||0} comidas{e.today?.training?` · ${e.today.training.slice(0,20)}`:""}
+                                    {e.today?.meals?.length||0} comidas{e.today?.exercises?.length?` · ${e.today.exercises.length} ejerc.`:e.today?.training?` · ${e.today.training.slice(0,20)}`:""}
                                   </div>
                                 </div>
                                 <div style={{textAlign:"right"}}>
