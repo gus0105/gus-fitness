@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Component } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SECTION_COLORS = {
@@ -97,12 +97,17 @@ function nowTime() {
 
 const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], suppsTaken: [], kcal: 0 };
 
+// Adjunta el token de sesión de Supabase en toda llamada a /api,
+// para que el backend pueda verificar quién hace la petición
+async function authedFetch(url, body) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = { "content-type": "application/json" };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  return fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+}
+
 async function callClaude(userPrompt) {
-  const response = await fetch("/api/coach", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt: userPrompt, system: COACH_SYSTEM }),
-  });
+  const response = await authedFetch("/api/coach", { prompt: userPrompt, system: COACH_SYSTEM });
   const json = await response.json();
   if (json.error) throw new Error(json.error);
   return json.text ?? "Sin respuesta.";
@@ -185,7 +190,54 @@ function calcStreak(entries) {
   return streak;
 }
 
-export default function App() {
+// Red de seguridad: si algo revienta durante el render, mostramos una pantalla
+// de recuperación en vez de dejar la app en negro (sin esto, un error no
+// controlado desmonta todo el árbol de React y no queda nada visible).
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("App crash:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          minHeight: "100dvh",
+          background: "#0a0a0f", color: "#e8f5e8",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 16, padding: 24, textAlign: "center", fontFamily: "-apple-system, sans-serif",
+        }}>
+          <div style={{ fontSize: 40 }}>⚠️</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Algo ha fallado</div>
+          <div style={{ fontSize: 13, color: "rgba(232,245,232,.6)" }}>
+            La app se ha encontrado con un error inesperado.
+          </div>
+          <button
+            style={{
+              padding: "12px 24px", borderRadius: 12, background: "#4ade80",
+              color: "#0a0a0f", fontWeight: 700, border: "none", fontSize: 14, cursor: "pointer",
+            }}
+            onClick={() => {
+              try { localStorage.removeItem("gus_cache"); } catch {}
+              window.location.href = "/";
+            }}
+          >
+            Recargar
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
   const [screen, setScreen]       = useState("home");
   const [transitioning, setTransitioning] = useState(false);
   const [slideDir, setSlideDir]     = useState(1); // 1=left, -1=right
@@ -342,16 +394,30 @@ export default function App() {
   // Handle OAuth redirect hash (Safari PWA fix)
   useEffect(() => {
     const hash = window.location.hash;
-    if (hash && hash.includes("access_token")) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser(session.user);
-          userRef.current = session.user;
-          // Clean URL
+    if (!hash) return;
+    // El propio proveedor puede devolver un error en el hash (p.ej. acceso denegado)
+    if (hash.includes("error=")) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setReady(true);
+      return;
+    }
+    if (hash.includes("access_token")) {
+      supabase.auth.getSession()
+        .then(({ data: { session } }) => {
+          if (session?.user) {
+            setUser(session.user);
+            userRef.current = session.user;
+            loadData(session.user.id);
+          }
+        })
+        .catch((e) => {
+          console.error("OAuth hash session error:", e);
+        })
+        .finally(() => {
+          // Limpiar siempre la URL y desbloquear la app, aunque falle la sesión
           window.history.replaceState({}, document.title, window.location.pathname);
-          loadData(session.user.id);
-        }
-      });
+          setReady(true);
+        });
     }
   }, []);
 
@@ -507,11 +573,7 @@ export default function App() {
           return arr;
         })()
       });
-      const res = await fetch("/api/push", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "subscribe", subscription: sub, user_id: userId })
-      });
+      const res = await authedFetch("/api/push", { action: "subscribe", subscription: sub });
       const data = await res.json();
       if (data.ok) {
         return true;
@@ -651,14 +713,10 @@ export default function App() {
   const analyzePhoto = async (b64) => {
     setAnPh(true);
     try {
-      const res = await fetch("/api/coach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          image: b64,
-          prompt: "Analiza esta foto de comida y estima los macronutrientes y calorías. Responde SOLO con un JSON así, sin texto extra: {\"desc\":\"descripción breve del plato\",\"prot\":25,\"carb\":40,\"fat\":12,\"kcal\":350}. Usa gramos enteros y kcal redondeadas. Si no puedes estimar, pon 0.",
-          system: "Eres un nutricionista experto. Analizas fotos de comida y estimas macronutrientes con precisión. Respondes siempre en JSON puro sin markdown."
-        }),
+      const res = await authedFetch("/api/coach", {
+        image: b64,
+        prompt: "Analiza esta foto de comida y estima los macronutrientes y calorías. Responde SOLO con un JSON así, sin texto extra: {\"desc\":\"descripción breve del plato\",\"prot\":25,\"carb\":40,\"fat\":12,\"kcal\":350}. Usa gramos enteros y kcal redondeadas. Si no puedes estimar, pon 0.",
+        system: "Eres un nutricionista experto. Analizas fotos de comida y estimas macronutrientes con precisión. Respondes siempre en JSON puro sin markdown."
       });
       const json = await res.json();
       const raw = json.text?.replace(/```json|```/g,"").trim();
@@ -701,13 +759,9 @@ export default function App() {
   const estimateKcalFromDesc = async (meal) => {
     if (meal.kcal) return; // already has kcal
     try {
-      const res = await fetch("/api/coach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          prompt: `Estima las calorías y macros de esta comida: "${meal.desc}". Responde SOLO con JSON sin texto extra: {"kcal":350,"prot":25,"carb":40,"fat":12}. Usa números enteros. Si no puedes estimar, usa 0.`,
-          system: "Eres un nutricionista experto. Estimas calorías y macros de comidas descritas en texto. Respondes siempre en JSON puro sin markdown ni texto adicional."
-        }),
+      const res = await authedFetch("/api/coach", {
+        prompt: `Estima las calorías y macros de esta comida: "${meal.desc}". Responde SOLO con JSON sin texto extra: {"kcal":350,"prot":25,"carb":40,"fat":12}. Usa números enteros. Si no puedes estimar, usa 0.`,
+        system: "Eres un nutricionista experto. Estimas calorías y macros de comidas descritas en texto. Respondes siempre en JSON puro sin markdown ni texto adicional."
       });
       const json = await res.json();
       const raw = json.text?.replace(/```json|```/g,"").trim();
@@ -739,13 +793,9 @@ export default function App() {
     if (!transcript?.trim()) return;
     setTranscribing(true);
     try {
-      const res = await fetch("/api/coach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          prompt: `El usuario ha dicho por voz lo que comió: "${transcript}". Extrae la descripción de la comida y estima los macros. Responde SOLO con JSON sin texto extra: {"desc":"descripción clara del plato","prot":25,"carb":40,"fat":12,"kcal":350}. Usa gramos enteros y kcal redondeadas.`,
-          system: "Eres un nutricionista experto. Interpretas descripciones de comidas en español y estimas macronutrientes. Respondes siempre en JSON puro sin markdown."
-        }),
+      const res = await authedFetch("/api/coach", {
+        prompt: `El usuario ha dicho por voz lo que comió: "${transcript}". Extrae la descripción de la comida y estima los macros. Responde SOLO con JSON sin texto extra: {"desc":"descripción clara del plato","prot":25,"carb":40,"fat":12,"kcal":350}. Usa gramos enteros y kcal redondeadas.`,
+        system: "Eres un nutricionista experto. Interpretas descripciones de comidas en español y estimas macronutrientes. Respondes siempre en JSON puro sin markdown."
       });
       const json = await res.json();
       const raw = json.text?.replace(/```json|```/g,"").trim();
@@ -2105,5 +2155,13 @@ export default function App() {
       </div>
     )}
   </div>
+  );
+}
+
+export default function AppRoot() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }
