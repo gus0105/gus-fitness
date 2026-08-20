@@ -294,6 +294,12 @@ function App() {
   const [exerciseCatalog, setExerciseCatalog] = useState(DEFAULT_EXERCISE_CATALOG);
   const [weightUnit, setWeightUnit] = useState("kg");
   const [newExerciseInputs, setNewExerciseInputs] = useState({});
+  const [setGroupId, setSetGroupId] = useState(null);
+  const [setExerciseName, setSetExerciseName] = useState("");
+  const [newQuickExercise, setNewQuickExercise] = useState("");
+  const [setWeight, setSetWeight] = useState("");
+  const [setReps, setSetReps] = useState("");
+  const [setUnit, setSetUnit] = useState("kg");
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -983,7 +989,55 @@ function App() {
   };
 
   const removeExercise = (id) => {
-    setT({ exercises: (today.exercises||[]).filter(x=>x.id!==id) });
+    const list = today.exercises || [];
+    const removed = list.find(x=>x.id===id);
+    const newExercises = list.filter(x=>x.id!==id);
+    let newGroups = today.muscleGroups || [];
+    if (removed?.muscleGroup && !newExercises.some(x=>x.muscleGroup===removed.muscleGroup)) {
+      newGroups = newGroups.filter(g=>g!==removed.muscleGroup);
+    }
+    setT({ exercises: newExercises, muscleGroups: newGroups });
+  };
+
+  // Abre la pantalla de "añadir serie" para un grupo muscular, precargando
+  // el último ejercicio/peso usado hoy en ese grupo (o el primero del catálogo)
+  const openAddSet = (groupId) => {
+    const todayGroupEx = (today.exercises||[]).filter(x=>x.muscleGroup===groupId);
+    const lastEx = todayGroupEx[todayGroupEx.length-1];
+    const catalogList = exerciseCatalog[groupId]||[];
+    const name = lastEx?.name || catalogList[0] || "";
+    setSetGroupId(groupId);
+    setSetExerciseName(name);
+    setNewQuickExercise("");
+    const lastSet = lastEx?.sets?.[lastEx.sets.length-1];
+    setSetWeight(lastSet?.weight ?? "");
+    setSetReps(lastSet?.reps ?? "");
+    setSetUnit(lastSet?.unit || weightUnit);
+    setScreen("addSet");
+  };
+
+  const saveSet = () => {
+    const name = (setExerciseName || newQuickExercise).trim();
+    if (!name) return;
+    if (setWeight==="" && setReps==="") return;
+    const catalogList = exerciseCatalog[setGroupId]||[];
+    if (!catalogList.includes(name)) {
+      saveExerciseCatalog({ ...exerciseCatalog, [setGroupId]: [...catalogList, name] });
+    }
+    const newSet = {
+      weight: setWeight!=="" ? parseFloat(setWeight) : "",
+      reps: setReps!=="" ? parseInt(setReps,10) : "",
+      unit: setUnit,
+    };
+    const list = today.exercises || [];
+    const idx = list.findIndex(x => x.name===name && x.muscleGroup===setGroupId);
+    const newList = idx>=0
+      ? list.map((x,i)=> i===idx ? { ...x, sets:[...x.sets, newSet] } : x)
+      : [...list, { id: Date.now(), name, muscleGroup: setGroupId, sets:[newSet] }];
+    const curGroups = today.muscleGroups||[];
+    const newGroups = curGroups.includes(setGroupId) ? curGroups : [...curGroups, setGroupId];
+    setT({ exercises: newList, muscleGroups: newGroups });
+    setScreen("home");
   };
 
   const buildContext = () => {
@@ -999,7 +1053,7 @@ function App() {
       : today.training || "ninguno";
     const exercises = today.exercises||[];
     const exerciseTxt = exercises.length
-      ? exercises.map(ex => `- ${ex.name}: ${ex.sets.map(s=>`${s.weight||"?"}kg×${s.reps||"?"}`).join(", ")}`).join("\n")
+      ? exercises.map(ex => `- ${ex.name}${ex.muscleGroup?` (${MUSCLE_GROUPS.find(m=>m.id===ex.muscleGroup)?.label||ex.muscleGroup})`:""}: ${ex.sets.map(s=>`${s.weight||"?"}${s.unit||"kg"}×${s.reps||"?"}`).join(", ")}`).join("\n")
       : "Sin ejercicios registrados";
     return { mealTxt, drinkTxt, muscleTxt, exerciseTxt };
   };
@@ -1402,9 +1456,14 @@ function App() {
                   {MUSCLE_GROUPS.filter(m=>m.cat===cat).map(m=>{
                     const active=(today.muscleGroups||[]).includes(m.id);
                     return <div key={m.id} onClick={()=>{
-                      const cur=today.muscleGroups||[];
-                      const next=active?cur.filter(x=>x!==m.id):[...cur,m.id];
-                      setT({muscleGroups:next});
+                      // Descanso no tiene ejercicios: se marca/desmarca como antes
+                      if (m.id === "descanso") {
+                        const cur=today.muscleGroups||[];
+                        const next=active?cur.filter(x=>x!==m.id):[...cur,m.id];
+                        setT({muscleGroups:next});
+                      } else {
+                        openAddSet(m.id);
+                      }
                     }} style={{
                       display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:20,cursor:"pointer",
                       border:`1.5px solid ${active?m.color:m.color+"44"}`,
@@ -1431,7 +1490,7 @@ function App() {
                     <div style={{cursor:"pointer",flex:1}} onClick={()=>openEditExercise(ex)}>
                       <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
                       <div style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>
-                        {ex.sets.length} {ex.sets.length===1?"serie":"series"} · {ex.sets.map(s=>`${s.weight||"-"}kg×${s.reps||"-"}`).join(", ")}
+                        {ex.sets.length} {ex.sets.length===1?"serie":"series"} · {ex.sets.map(s=>`${s.weight||"-"}${s.unit||"kg"}×${s.reps||"-"}`).join(", ")}
                       </div>
                     </div>
                     <button style={g.rm} onClick={()=>removeExercise(ex.id)}>×</button>
@@ -1746,6 +1805,54 @@ function App() {
             <button style={g.btnP} onClick={saveExercise}>Guardar ejercicio ✓</button>
           </div>
         </>}
+
+        {screen==="addSet"&&(()=>{
+          const groupInfo = MUSCLE_GROUPS.find(m=>m.id===setGroupId);
+          const catalogList = exerciseCatalog[setGroupId]||[];
+          return <>
+            <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
+            <div style={{marginTop:6}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20}}>
+                {groupInfo&&<div style={{width:26,height:26,borderRadius:"50%",background:`${groupInfo.color}33`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:groupInfo.abbr.length>2?14:11,fontWeight:800,color:groupInfo.color,flexShrink:0}}>{groupInfo.abbr}</div>}
+                <div style={{fontSize:18,fontWeight:900}}>Serie de {groupInfo?.label||""}</div>
+              </div>
+
+              <label style={g.lbl}>Ejercicio</label>
+              {catalogList.length>0
+                ? <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
+                    {catalogList.map(name=>(
+                      <button key={name} style={g.chip(setExerciseName===name)}
+                        onClick={()=>{ setSetExerciseName(name); setNewQuickExercise(""); }}>{name}</button>
+                    ))}
+                  </div>
+                : <div style={{fontSize:12,color:"rgba(232,245,232,.35)",marginBottom:12}}>Todavía no hay ejercicios en este grupo — añade uno abajo.</div>
+              }
+              <input style={g.inp} placeholder="O escribe uno nuevo..." value={newQuickExercise}
+                onChange={e=>{ setNewQuickExercise(e.target.value); setSetExerciseName(""); }}/>
+
+              <label style={g.lbl}>Peso</label>
+              <div style={{display:"flex",gap:8,marginBottom:18}}>
+                <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="ej: 60"
+                  value={setWeight} onChange={e=>setSetWeight(e.target.value)}/>
+                <div style={{display:"flex",borderRadius:12,overflow:"hidden",border:"1px solid rgba(74,222,128,.2)",flexShrink:0}}>
+                  {["kg","lb"].map(u=>(
+                    <button key={u} onClick={()=>setSetUnit(u)} style={{
+                      padding:"0 16px",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,
+                      background:setUnit===u?"rgba(74,222,128,.18)":"transparent",
+                      color:setUnit===u?"#4ade80":"rgba(232,245,232,.4)",
+                    }}>{u.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+
+              <label style={g.lbl}>Repeticiones</label>
+              <input style={g.inp} type="number" inputMode="numeric" placeholder="ej: 10"
+                value={setReps} onChange={e=>setSetReps(e.target.value)}/>
+
+              <button style={g.btnP} onClick={saveSet}>Guardar serie ✓</button>
+            </div>
+          </>;
+        })()}
 
         {screen==="result"&&<>
           <button style={g.back} onClick={()=>{
@@ -2253,7 +2360,7 @@ function App() {
                   {selEntry.today?.exercises?.length>0&&<div style={{marginBottom:8}}>
                     {selEntry.today.exercises.map((ex,i)=>(
                       <div key={i} style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:2}}>
-                        💪 {ex.name}: {ex.sets.map(s=>`${s.weight||"-"}kg×${s.reps||"-"}`).join(", ")}
+                        💪 {ex.name}: {ex.sets.map(s=>`${s.weight||"-"}${s.unit||"kg"}×${s.reps||"-"}`).join(", ")}
                       </div>
                     ))}
                   </div>}
