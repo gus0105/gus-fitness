@@ -82,6 +82,25 @@ const MUSCLE_GROUPS = [
 
 const CAT_LABELS = { empuje:"Empuje", tiron:"Tirón", piernas:"Piernas", core:"Core y otros" };
 
+// Catálogo inicial de ejercicios por grupo muscular — editable desde Ajustes.
+// Sirve de punto de partida; el usuario añade/quita los suyos.
+const DEFAULT_EXERCISE_CATALOG = {
+  pecho:       ["Press banca", "Press inclinado", "Aperturas", "Fondos"],
+  hombros:     ["Press militar", "Elevaciones laterales", "Pájaros"],
+  triceps:     ["Press francés", "Extensión en polea", "Fondos en banco"],
+  espalda:     ["Dominadas", "Remo con barra", "Jalón al pecho"],
+  biceps:      ["Curl con barra", "Curl martillo", "Curl Scott"],
+  antebrazos:  ["Curl de muñeca", "Farmer walk"],
+  cuadriceps:  ["Sentadilla", "Prensa", "Zancadas"],
+  isquios:     ["Peso muerto rumano", "Curl femoral"],
+  gluteos:     ["Hip thrust", "Peso muerto sumo"],
+  gemelos:     ["Elevación de talones de pie", "Elevación de talones sentado"],
+  abdominales: ["Crunch", "Plancha", "Elevación de piernas"],
+  lumbar:      ["Hiperextensiones", "Peso muerto"],
+  cardio:      ["Cinta", "Bici", "Elíptica"],
+  descanso:    [],
+};
+
 function timeSlot() {
   const h = new Date().getHours();
   if (h < 10) return "breakfast";
@@ -272,6 +291,9 @@ function App() {
   const [exName, setExName]       = useState("");
   const [exSets, setExSets]       = useState([{ weight:"", reps:"" }]);
   const [editingExerciseId, setEditingExerciseId] = useState(null);
+  const [exerciseCatalog, setExerciseCatalog] = useState(DEFAULT_EXERCISE_CATALOG);
+  const [weightUnit, setWeightUnit] = useState("kg");
+  const [newExerciseInputs, setNewExerciseInputs] = useState({});
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -354,6 +376,8 @@ function App() {
         if (p.notifConfig) setNotifConfig(p.notifConfig);
         if (p.userProfile) setUserProfile(p.userProfile);
         if (p.macroGoals) setMacroGoals(p.macroGoals);
+        if (p.exerciseCatalog) setExerciseCatalog(p.exerciseCatalog);
+        if (p.weightUnit) setWeightUnit(p.weightUnit);
       }
     } catch {}
     setSettingsLoaded(true);
@@ -364,14 +388,43 @@ function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit }));
   };
 
   const saveNotifConfig = (next) => {
     setNotifConfig(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit
     }));
+  };
+
+  const saveExerciseCatalog = (next) => {
+    setExerciseCatalog(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit
+    }));
+  };
+
+  const saveWeightUnit = (next) => {
+    setWeightUnit(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next
+    }));
+  };
+
+  const addCatalogExercise = (groupId) => {
+    const name = (newExerciseInputs[groupId]||"").trim();
+    if (!name) return;
+    const current = exerciseCatalog[groupId]||[];
+    if (!current.includes(name)) {
+      saveExerciseCatalog({ ...exerciseCatalog, [groupId]: [...current, name] });
+    }
+    setNewExerciseInputs(prev=>({...prev,[groupId]:""}));
+  };
+
+  const removeCatalogExercise = (groupId, name) => {
+    const current = exerciseCatalog[groupId]||[];
+    saveExerciseCatalog({ ...exerciseCatalog, [groupId]: current.filter(n=>n!==name) });
   };
 
   const signInWithGoogle = async () => {
@@ -1138,7 +1191,8 @@ function App() {
     setUserProfile(profile);
     localStorage.setItem("gus_settings", JSON.stringify({
       kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
-      macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat }
+      macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat },
+      exerciseCatalog, weightUnit
     }));
   };
 
@@ -1988,6 +2042,20 @@ function App() {
           </div>
 
           <div style={g.card}>
+            <div style={g.sec}>🏋️ Ejercicios</div>
+            <div style={{fontSize:12,color:"rgba(232,245,232,.45)",marginBottom:14,lineHeight:1.5}}>
+              Ejercicios disponibles por grupo muscular y tu unidad de peso preferida.
+            </div>
+            <div style={{fontSize:10,fontWeight:700,color:"rgba(74,222,128,.6)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:8}}>Unidad de peso</div>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {["kg","lb"].map(u=>(
+                <button key={u} style={g.chip(weightUnit===u)} onClick={()=>saveWeightUnit(u)}>{u.toUpperCase()}</button>
+              ))}
+            </div>
+            <button style={{...g.btnS,marginBottom:0}} onClick={()=>setScreen("exerciseCatalog")}>Gestionar catálogo de ejercicios →</button>
+          </div>
+
+          <div style={g.card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={g.sec}>🔔 Notificaciones</div>
               {typeof Notification!=="undefined" && Notification.permission!=="granted" && (
@@ -2054,6 +2122,46 @@ function App() {
             <div style={g.sec}>👤 Cuenta</div>
             <div style={{fontSize:13,color:"rgba(232,245,232,.5)",marginBottom:14}}>{user?.email}</div>
             <button style={{...g.btnS,marginBottom:0,borderColor:"rgba(248,113,113,.2)",color:"#f87171"}} onClick={signOut}>Cerrar sesión</button>
+          </div>
+        </>}
+
+        {screen==="exerciseCatalog"&&<>
+          <button style={g.back} onClick={()=>setScreen("settings")}>← Volver</button>
+          <div style={{marginTop:6}}>
+            <div style={{fontSize:18,fontWeight:900,marginBottom:6}}>🏋️ Catálogo de ejercicios</div>
+            <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:22,lineHeight:1.5}}>
+              Añade o quita ejercicios por grupo muscular. Luego podrás elegir entre ellos al registrar una serie.
+            </div>
+            {["empuje","tiron","piernas","core"].map(cat=>(
+              <div key={cat} style={{marginBottom:20}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:"rgba(74,222,128,.5)",marginBottom:10}}>{CAT_LABELS[cat]}</div>
+                {MUSCLE_GROUPS.filter(m=>m.cat===cat && m.id!=="descanso").map(m=>(
+                  <div key={m.id} style={{...g.card,marginBottom:10,padding:14}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <div style={{width:22,height:22,borderRadius:"50%",background:`${m.color}33`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:m.abbr.length>2?12:9,fontWeight:800,color:m.color,flexShrink:0}}>{m.abbr}</div>
+                      <div style={{fontSize:13,fontWeight:700}}>{m.label}</div>
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+                      {(exerciseCatalog[m.id]||[]).length===0
+                        ? <div style={{fontSize:11,color:"rgba(232,245,232,.25)"}}>Sin ejercicios todavía</div>
+                        : (exerciseCatalog[m.id]||[]).map(name=>(
+                          <div key={name} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 6px 5px 10px",borderRadius:16,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)"}}>
+                            <span style={{fontSize:12}}>{name}</span>
+                            <button style={{...g.rm,fontSize:15}} onClick={()=>removeCatalogExercise(m.id,name)}>×</button>
+                          </div>
+                        ))}
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <input style={{...g.inp,marginBottom:0,flex:1,padding:"9px 10px",fontSize:12}} placeholder="Nuevo ejercicio..."
+                        value={newExerciseInputs[m.id]||""}
+                        onChange={e=>setNewExerciseInputs(prev=>({...prev,[m.id]:e.target.value}))}
+                        onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addCatalogExercise(m.id); } }}/>
+                      <button style={g.addBtn} onClick={()=>addCatalogExercise(m.id)}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </>}
 
