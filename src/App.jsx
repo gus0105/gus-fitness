@@ -114,6 +114,12 @@ function nowTime() {
   return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Formatea un valor de serie (peso o reps): 0 es un valor válido (ej. dominadas
+// a peso corporal), solo "" / null / undefined se muestran como "-"
+function fmtSetVal(v) {
+  return (v === "" || v === null || v === undefined) ? "-" : v;
+}
+
 const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], exercises: [], suppsTaken: [], kcal: 0 };
 
 // Adjunta el token de sesión de Supabase en toda llamada a /api,
@@ -130,6 +136,59 @@ async function callClaude(userPrompt) {
   const json = await response.json();
   if (json.error) throw new Error(json.error);
   return json.text ?? "Sin respuesta.";
+}
+
+// Valores para las ruletas de peso (múltiplos de 2.5) y repeticiones
+const WEIGHT_WHEEL_VALUES = Array.from({ length: 121 }, (_, i) => Math.round(i * 2.5 * 10) / 10); // 0 a 300 de 2.5 en 2.5
+const REPS_WHEEL_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1 a 30
+
+// Ruleta seleccionable estilo iOS: se desliza verticalmente y el valor centrado
+// (entre las dos líneas) es el seleccionado. Aislado como componente fuera de App
+// para que no se remonte y pierda el scroll en cada render (mismo motivo que WeightCard).
+function WheelPicker({ values, value, onChange, itemHeight = 40, visibleCount = 5, color = "#4ade80" }) {
+  const containerRef = useRef(null);
+  const debounceRef = useRef(null);
+  const initialIdx = Math.max(0, values.indexOf(value));
+  const [centerIdx, setCenterIdx] = useState(initialIdx);
+  const containerHeight = itemHeight * visibleCount;
+  const padding = (containerHeight - itemHeight) / 2;
+
+  useEffect(() => {
+    if (containerRef.current) containerRef.current.scrollTop = initialIdx * itemHeight;
+    // Solo al montar: la pantalla se remonta entera cada vez que se abre, así que
+    // no hace falta re-sincronizar en cada cambio de "value".
+  }, []);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const idx = Math.min(values.length - 1, Math.max(0, Math.round(el.scrollTop / itemHeight)));
+    setCenterIdx(idx);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => onChange(values[idx]), 120);
+  };
+
+  const scrollToIdx = (idx) => {
+    containerRef.current?.scrollTo({ top: idx * itemHeight, behavior: "smooth" });
+  };
+
+  return (
+    <div style={{ position:"relative" }}>
+      <div style={{ position:"absolute", top:padding, left:0, right:0, height:itemHeight, borderTop:`1px solid ${color}55`, borderBottom:`1px solid ${color}55`, pointerEvents:"none" }}/>
+      <div ref={containerRef} onScroll={handleScroll}
+        style={{ height:containerHeight, overflowY:"scroll", scrollSnapType:"y mandatory", WebkitOverflowScrolling:"touch" }}>
+        <div style={{ height:padding }}/>
+        {values.map((v,i)=>(
+          <div key={v} onClick={()=>scrollToIdx(i)} style={{
+            height:itemHeight, display:"flex", alignItems:"center", justifyContent:"center",
+            scrollSnapAlign:"center", fontSize:i===centerIdx?20:15, fontWeight:i===centerIdx?800:500,
+            color:i===centerIdx?color:"rgba(232,245,232,.3)", transition:"font-size .15s, color .15s", cursor:"pointer",
+          }}>{v}</div>
+        ))}
+        <div style={{ height:padding }}/>
+      </div>
+    </div>
+  );
 }
 
 function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
@@ -297,8 +356,8 @@ function App() {
   const [setGroupId, setSetGroupId] = useState(null);
   const [setExerciseName, setSetExerciseName] = useState("");
   const [newQuickExercise, setNewQuickExercise] = useState("");
-  const [setWeight, setSetWeight] = useState("");
-  const [setReps, setSetReps] = useState("");
+  const [setWeight, setSetWeight] = useState(0);
+  const [setReps, setSetReps] = useState(8);
   const [setUnit, setSetUnit] = useState("kg");
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
@@ -1010,8 +1069,8 @@ function App() {
     setSetExerciseName(name);
     setNewQuickExercise("");
     const lastSet = lastEx?.sets?.[lastEx.sets.length-1];
-    setSetWeight(lastSet?.weight ?? "");
-    setSetReps(lastSet?.reps ?? "");
+    setSetWeight(lastSet?.weight ?? 0);
+    setSetReps(lastSet?.reps ?? 8);
     setSetUnit(lastSet?.unit || weightUnit);
     setScreen("addSet");
   };
@@ -1019,16 +1078,11 @@ function App() {
   const saveSet = () => {
     const name = (setExerciseName || newQuickExercise).trim();
     if (!name) return;
-    if (setWeight==="" && setReps==="") return;
     const catalogList = exerciseCatalog[setGroupId]||[];
     if (!catalogList.includes(name)) {
       saveExerciseCatalog({ ...exerciseCatalog, [setGroupId]: [...catalogList, name] });
     }
-    const newSet = {
-      weight: setWeight!=="" ? parseFloat(setWeight) : "",
-      reps: setReps!=="" ? parseInt(setReps,10) : "",
-      unit: setUnit,
-    };
+    const newSet = { weight: setWeight, reps: setReps, unit: setUnit };
     const list = today.exercises || [];
     const idx = list.findIndex(x => x.name===name && x.muscleGroup===setGroupId);
     const newList = idx>=0
@@ -1053,7 +1107,7 @@ function App() {
       : today.training || "ninguno";
     const exercises = today.exercises||[];
     const exerciseTxt = exercises.length
-      ? exercises.map(ex => `- ${ex.name}${ex.muscleGroup?` (${MUSCLE_GROUPS.find(m=>m.id===ex.muscleGroup)?.label||ex.muscleGroup})`:""}: ${ex.sets.map(s=>`${s.weight||"?"}${s.unit||"kg"}×${s.reps||"?"}`).join(", ")}`).join("\n")
+      ? exercises.map(ex => `- ${ex.name}${ex.muscleGroup?` (${MUSCLE_GROUPS.find(m=>m.id===ex.muscleGroup)?.label||ex.muscleGroup})`:""}: ${ex.sets.map(s=>`${fmtSetVal(s.weight)}${s.unit||"kg"}×${fmtSetVal(s.reps)}`).join(", ")}`).join("\n")
       : "Sin ejercicios registrados";
     return { mealTxt, drinkTxt, muscleTxt, exerciseTxt };
   };
@@ -1490,7 +1544,7 @@ function App() {
                     <div style={{cursor:"pointer",flex:1}} onClick={()=>openEditExercise(ex)}>
                       <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
                       <div style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>
-                        {ex.sets.length} {ex.sets.length===1?"serie":"series"} · {ex.sets.map(s=>`${s.weight||"-"}${s.unit||"kg"}×${s.reps||"-"}`).join(", ")}
+                        {ex.sets.length} {ex.sets.length===1?"serie":"series"} · {ex.sets.map(s=>`${fmtSetVal(s.weight)}${s.unit||"kg"}×${fmtSetVal(s.reps)}`).join(", ")}
                       </div>
                     </div>
                     <button style={g.rm} onClick={()=>removeExercise(ex.id)}>×</button>
@@ -1830,24 +1884,26 @@ function App() {
               <input style={g.inp} placeholder="O escribe uno nuevo..." value={newQuickExercise}
                 onChange={e=>{ setNewQuickExercise(e.target.value); setSetExerciseName(""); }}/>
 
-              <label style={g.lbl}>Peso</label>
-              <div style={{display:"flex",gap:8,marginBottom:18}}>
-                <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="ej: 60"
-                  value={setWeight} onChange={e=>setSetWeight(e.target.value)}/>
-                <div style={{display:"flex",borderRadius:12,overflow:"hidden",border:"1px solid rgba(74,222,128,.2)",flexShrink:0}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <label style={{...g.lbl,marginBottom:0}}>Peso</label>
+                <div style={{display:"flex",borderRadius:10,overflow:"hidden",border:"1px solid rgba(74,222,128,.2)",flexShrink:0}}>
                   {["kg","lb"].map(u=>(
                     <button key={u} onClick={()=>setSetUnit(u)} style={{
-                      padding:"0 16px",border:"none",cursor:"pointer",fontWeight:700,fontSize:12,
+                      padding:"4px 14px",border:"none",cursor:"pointer",fontWeight:700,fontSize:11,
                       background:setUnit===u?"rgba(74,222,128,.18)":"transparent",
                       color:setUnit===u?"#4ade80":"rgba(232,245,232,.4)",
                     }}>{u.toUpperCase()}</button>
                   ))}
                 </div>
               </div>
+              <div style={{marginBottom:18}}>
+                <WheelPicker values={WEIGHT_WHEEL_VALUES} value={setWeight} onChange={setSetWeight} color={groupInfo?.color||"#4ade80"}/>
+              </div>
 
               <label style={g.lbl}>Repeticiones</label>
-              <input style={g.inp} type="number" inputMode="numeric" placeholder="ej: 10"
-                value={setReps} onChange={e=>setSetReps(e.target.value)}/>
+              <div style={{marginBottom:18}}>
+                <WheelPicker values={REPS_WHEEL_VALUES} value={setReps} onChange={setSetReps} color={groupInfo?.color||"#4ade80"}/>
+              </div>
 
               <button style={g.btnP} onClick={saveSet}>Guardar serie ✓</button>
             </div>
@@ -2360,7 +2416,7 @@ function App() {
                   {selEntry.today?.exercises?.length>0&&<div style={{marginBottom:8}}>
                     {selEntry.today.exercises.map((ex,i)=>(
                       <div key={i} style={{fontSize:12,color:"rgba(129,140,248,.9)",marginBottom:2}}>
-                        💪 {ex.name}: {ex.sets.map(s=>`${s.weight||"-"}${s.unit||"kg"}×${s.reps||"-"}`).join(", ")}
+                        💪 {ex.name}: {ex.sets.map(s=>`${fmtSetVal(s.weight)}${s.unit||"kg"}×${fmtSetVal(s.reps)}`).join(", ")}
                       </div>
                     ))}
                   </div>}
