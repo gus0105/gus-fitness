@@ -120,22 +120,43 @@ function fmtSetVal(v) {
   return (v === "" || v === null || v === undefined) ? "-" : v;
 }
 
-// ---- Progreso de peso: media móvil, proyección con banda de incertidumbre e insight ----
-// (usado en Estadísticas → sección Peso)
+// ---- Progreso corporal: media móvil, proyección con banda de incertidumbre e insight ----
+// (usado en Estadísticas → Peso y % Grasa)
 
 const DAY_MS = 86400000;
 
+// Peso del día: entry.today.weight
+function getWeightValue(entry) {
+  const v = entry?.today?.weight ? parseFloat(entry.today.weight) : null;
+  return (v != null && !isNaN(v)) ? v : null;
+}
+
+// % de grasa del día: entry.today.grasa, o si no se registró a mano, lo extrae
+// del texto del feedback del coach ("Grasa corporal: 23.8%") — mismo criterio
+// que ya usaba la tarjeta de Estadísticas.
+function getGrasaValue(entry) {
+  if (entry?.today?.grasa) {
+    const v = parseFloat(entry.today.grasa);
+    if (!isNaN(v)) return v;
+  }
+  const m = entry?.feedback?.match(/Grasa corporal: ([\d.]+)%/);
+  if (m) {
+    const v = parseFloat(m[1]);
+    if (!isNaN(v)) return v;
+  }
+  return null;
+}
+
 // Serie diaria (con huecos) de los últimos `days` días naturales hasta hoy.
-// entries: [{ date:"YYYY-MM-DD", today:{ weight, ... } }]
-function buildWeightSeries(entries, days, todayStr) {
+// entries: [{ date:"YYYY-MM-DD", today:{...}, feedback }], getValue: entry => número | null
+function buildMetricSeries(entries, days, todayStr, getValue) {
   const todayD = new Date(todayStr + "T00:00:00");
   const series = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(todayD.getTime() - i * DAY_MS);
     const dateStr = d.toISOString().split("T")[0];
     const entry = entries.find(e => e.date === dateStr);
-    const w = entry?.today?.weight ? parseFloat(entry.today.weight) : null;
-    series.push({ date: dateStr, w: (w != null && !isNaN(w)) ? w : null });
+    series.push({ date: dateStr, w: entry ? getValue(entry) : null });
   }
   return series;
 }
@@ -179,7 +200,7 @@ function linearRegression(points) {
   return { slope, intercept, residStd, slopeStdErr, n };
 }
 
-// Ancho (± kg) de la banda de incertidumbre a `horizonDays` de hoy.
+// Ancho (± unidad de la métrica) de la banda de incertidumbre a `horizonDays` de hoy.
 // Heurística visual (crece con la distancia), no un intervalo estadístico estricto.
 function bandHalfWidth(reg, horizonDays) {
   return reg.residStd * 0.7 + reg.slopeStdErr * 1.6 * horizonDays;
@@ -320,14 +341,14 @@ function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
 // Progreso de peso: media móvil de 7 días, selector de rango, proyección con banda de
 // incertidumbre hasta el peso objetivo, comparativa de periodos e insight en texto.
 // Standalone (como WeightCard) para no remontarse y perder el rango/hover seleccionado en cada render.
-function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
+function MetricProgressChart({ entries, todayStr, target, g, label, tableLabel, unit, color, decimals = 1, getValue }) {
   const [range, setRange] = useState(30);
   const [hover, setHover] = useState(null);
   const [showTable, setShowTable] = useState(false);
 
   const FULL_DAYS = 90;
   const lastIdx = FULL_DAYS - 1;
-  const fullSeries = buildWeightSeries(entries, FULL_DAYS, todayStr);
+  const fullSeries = buildMetricSeries(entries, FULL_DAYS, todayStr, getValue);
   const maFull = movingAverageSeries(fullSeries);
 
   const REG_WINDOW = 21;
@@ -337,7 +358,6 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
     .map(p => ({ x: p.idx, y: p.ma }));
   const reg = linearRegression(regPoints);
 
-  const target = parseFloat(goalWeight) || null;
   const PROJECTION_DAYS = 30;
   // Más allá de ~1 año no es una predicción útil, es ruido con forma de fecha — se descarta.
   const MAX_HORIZON_DAYS = 365;
@@ -360,15 +380,34 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
   const bandUp = reg ? projPts.map(p => ({ idx: p.idx, y: p.y + bandHalfWidth(reg, p.idx - lastIdx) })) : [];
   const bandDown = reg ? projPts.map(p => ({ idx: p.idx, y: p.y - bandHalfWidth(reg, p.idx - lastIdx) })) : [];
 
-  let ys = [...dotPts, ...maPts, ...projPts, ...bandUp, ...bandDown].map(p => p.y);
-  if (target) ys.push(target);
-  if (!ys.length) ys = [70, 80];
-  const yMin = Math.min(...ys) - 0.5, yMax = Math.max(...ys) + 0.5;
+  // El dominio vertical sale SOLO del histórico visible: la proyección/banda (ver yClamp más abajo)
+  // y el objetivo, si están lejos, no lo estiran — se recortan contra el borde con una etiqueta en
+  // vez de aplastar la curva real (un objetivo a varios kg de distancia no debería dejar los datos
+  // reales apretados en una esquina del gráfico).
+  const dataVals = [...dotPts, ...maPts].map(p => p.y);
+  const dataMin = dataVals.length ? Math.min(...dataVals) : 0;
+  const dataMax = dataVals.length ? Math.max(...dataVals) : 1;
+  const dataSpan = Math.max(dataMax - dataMin, 0.001);
+
+  const MAX_TARGET_EXTRA = dataSpan; // el objetivo puede ensanchar el eje como mucho 1x el rango real
+  let domainMin = dataMin, domainMax = dataMax, targetClipped = null;
+  if (target != null) {
+    if (target < dataMin) {
+      domainMin = Math.max(target, dataMin - MAX_TARGET_EXTRA);
+      if (target < domainMin) targetClipped = "below";
+    } else if (target > dataMax) {
+      domainMax = Math.min(target, dataMax + MAX_TARGET_EXTRA);
+      if (target > domainMax) targetClipped = "above";
+    }
+  }
+  const pad = Math.max(dataSpan * 0.1, 0.3);
+  const yMin = domainMin - pad, yMax = domainMax + pad;
 
   const W = 400, H = 220, LEFT = 30, RIGHT = 6, TOP = 10, BOTTOM = 20;
   const PLOT_W = W - LEFT - RIGHT, PLOT_H = H - TOP - BOTTOM;
   const xS = idx => LEFT + ((idx - startIdx) / (endIdx - startIdx)) * PLOT_W;
   const yS = v => TOP + ((yMax - v) / (yMax - yMin)) * PLOT_H;
+  const yClamp = py => Math.min(H - BOTTOM, Math.max(TOP, py));
 
   const dateAt = idx => {
     const d = new Date(todayStr + "T00:00:00");
@@ -376,17 +415,19 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
     return d.toISOString().split("T")[0];
   };
 
-  const gridStep = (yMax - yMin) > 9 ? 2 : 1;
+  const gridStep = (yMax - yMin) > 9 ? 2 : (yMax - yMin) > 3 ? 1 : 0.5;
   const gridVals = [];
-  for (let v = Math.ceil(yMin); v <= Math.floor(yMax); v += gridStep) gridVals.push(v);
+  for (let v = Math.ceil(yMin / gridStep) * gridStep; v <= yMax; v += gridStep) gridVals.push(Math.round(v * 100) / 100);
 
   const maPath = maPts.length ? "M " + maPts.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") : "";
-  const projPath = projPts.length ? "M " + projPts.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") : "";
+  // Proyección y banda se recortan al dominio visible (yClamp): si el ritmo las llevaría
+  // fuera de la escala, la línea se queda pegada al borde en vez de estirar todo el gráfico.
+  const projPath = projPts.length ? "M " + projPts.map(p => `${xS(p.idx)} ${yClamp(yS(p.y))}`).join(" L ") : "";
   const bandPath = bandUp.length
-    ? "M " + bandUp.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") + " L " + bandDown.slice().reverse().map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") + " Z"
+    ? "M " + bandUp.map(p => `${xS(p.idx)} ${yClamp(yS(p.y))}`).join(" L ") + " L " + bandDown.slice().reverse().map(p => `${xS(p.idx)} ${yClamp(yS(p.y))}`).join(" L ") + " Z"
     : "";
 
-  // Tendencia de la ventana visible (kg/semana)
+  // Tendencia de la ventana visible (unidad/semana)
   const aMA = nearestMA(maFull, startIdx), bMA = nearestMA(maFull, lastIdx);
   const trendWeek = (aMA != null && bMA != null && lastIdx > startIdx) ? ((bMA - aMA) / (lastIdx - startIdx)) * 7 : null;
 
@@ -405,15 +446,15 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
 
   let insight = "";
   if (w21 != null) {
-    insight += `En las últimas 3 semanas ${w21 <= 0 ? "bajas" : "subes"} de media ${Math.abs(w21).toFixed(2)} kg/semana. `;
-    if (slowdown) insight += `En los últimos 14 días el ritmo se ha frenado (${Math.abs(w14).toFixed(2)} kg/semana) — vigila si se convierte en estancamiento real. `;
+    insight += `En las últimas 3 semanas ${w21 <= 0 ? "bajas" : "subes"} de media ${Math.abs(w21).toFixed(2)} ${unit}/semana. `;
+    if (slowdown) insight += `En los últimos 14 días el ritmo se ha frenado (${Math.abs(w14).toFixed(2)} ${unit}/semana) — vigila si se convierte en estancamiento real. `;
   } else {
     insight += "Todavía no hay suficientes registros recientes para calcular un ritmo fiable. ";
   }
   if (target && w21 != null) {
     if (hCentral != null) {
       const dC = dateAt(Math.round(lastIdx + hCentral));
-      insight += `A este paso llegarías a ${target} kg hacia el ${fmtDateEs(dC)}` +
+      insight += `A este paso llegarías a ${target}${unit} hacia el ${fmtDateEs(dC)}` +
         (hOpt != null && hPess != null ? `, entre el ${fmtDateEs(dateAt(Math.round(lastIdx + hOpt)))} y el ${fmtDateEs(dateAt(Math.round(lastIdx + hPess)))}.` : ".");
     } else {
       insight += "Con el ritmo actual, la fecha objetivo no sería fiable todavía.";
@@ -433,14 +474,14 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
 
   return <>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:8}}>
-      <div style={g.sec}>⚖️ Peso</div>
+      <div style={g.sec}>{label}</div>
       <div style={{display:"flex",gap:6}}>
         {[[14,"2 sem"],[30,"1 mes"],[90,"todo"]].map(([d,lbl])=>(
           <button key={d} onClick={()=>setRange(d)}
             style={{fontSize:10.5,fontWeight:600,padding:"5px 10px",borderRadius:99,cursor:"pointer",
-              border: range===d?"1px solid #4ade80":"1px solid rgba(255,255,255,.1)",
-              background: range===d?"rgba(74,222,128,.15)":"rgba(255,255,255,.03)",
-              color: range===d?"#4ade80":"rgba(232,245,232,.45)"}}>{lbl}</button>
+              border: range===d?`1px solid ${color}`:"1px solid rgba(255,255,255,.1)",
+              background: range===d?`${color}26`:"rgba(255,255,255,.03)",
+              color: range===d?color:"rgba(232,245,232,.45)"}}>{lbl}</button>
         ))}
       </div>
     </div>
@@ -453,27 +494,34 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
             <text x={2} y={yS(v)+3} fontSize="8.5" fill="rgba(232,245,232,.3)">{v}</text>
           </g>
         ))}
-        {target && <line x1={LEFT} x2={W-RIGHT} y1={yS(target)} y2={yS(target)} stroke="rgba(232,245,232,.35)" strokeWidth="1" strokeDasharray="2 4"/>}
+        {target != null && (targetClipped ? (
+          <g>
+            <line x1={LEFT} x2={W-RIGHT} y1={targetClipped==="below"?H-BOTTOM:TOP} y2={targetClipped==="below"?H-BOTTOM:TOP} stroke="rgba(232,245,232,.35)" strokeWidth="1" strokeDasharray="2 4"/>
+            <text x={W-RIGHT} y={targetClipped==="below"?H-BOTTOM-4:TOP+10} fontSize="8.5" fill="rgba(232,245,232,.5)" textAnchor="end">{targetClipped==="below"?"↓":"↑"} objetivo {target}{unit}</text>
+          </g>
+        ) : (
+          <line x1={LEFT} x2={W-RIGHT} y1={yS(target)} y2={yS(target)} stroke="rgba(232,245,232,.35)" strokeWidth="1" strokeDasharray="2 4"/>
+        ))}
         {bandPath && <path d={bandPath} fill="rgba(167,139,250,.14)" stroke="none"/>}
         <line x1={xS(lastIdx)} x2={xS(lastIdx)} y1={TOP} y2={H-BOTTOM} stroke="rgba(255,255,255,.15)" strokeWidth="1"/>
         {projPath && <path d={projPath} fill="none" stroke="#a78bfa" strokeWidth="2" strokeDasharray="5 4" strokeLinecap="round"/>}
-        {dotPts.map(p=><circle key={p.idx} cx={xS(p.idx)} cy={yS(p.y)} r="2" fill="#4ade80" opacity="0.4"/>)}
-        {maPath && <path d={maPath} fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>}
-        {maPts.length>0 && <circle cx={xS(maPts[maPts.length-1].idx)} cy={yS(maPts[maPts.length-1].y)} r="4" fill="#4ade80" stroke="#0a0a0f" strokeWidth="2"/>}
+        {dotPts.map(p=><circle key={p.idx} cx={xS(p.idx)} cy={yS(p.y)} r="2" fill={color} opacity="0.4"/>)}
+        {maPath && <path d={maPath} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>}
+        {maPts.length>0 && <circle cx={xS(maPts[maPts.length-1].idx)} cy={yS(maPts[maPts.length-1].y)} r="4" fill={color} stroke="#0a0a0f" strokeWidth="2"/>}
         {hover && <line x1={xS(hover.idx)} x2={xS(hover.idx)} y1={TOP} y2={H-BOTTOM} stroke="rgba(255,255,255,.25)" strokeWidth="1"/>}
       </svg>
       {hover && (
-        <div style={{position:"absolute",left:`${(xS(hover.idx)/W)*100}%`,top:`${(yS(hover.val)/H)*100}%`,transform:"translate(-50%,-130%)",
-          background:"#0a0a0f",border:"1px solid rgba(74,222,128,.3)",borderRadius:8,padding:"5px 9px",fontSize:11,color:"#e8f5e8",whiteSpace:"nowrap",pointerEvents:"none",zIndex:5}}>
+        <div style={{position:"absolute",left:`${(xS(hover.idx)/W)*100}%`,top:`${(yClamp(yS(hover.val))/H)*100}%`,transform:"translate(-50%,-130%)",
+          background:"#0a0a0f",border:`1px solid ${color}4d`,borderRadius:8,padding:"5px 9px",fontSize:11,color:"#e8f5e8",whiteSpace:"nowrap",pointerEvents:"none",zIndex:5}}>
           <b style={{display:"block",fontSize:9,color:"rgba(232,245,232,.4)",fontWeight:600}}>{fmtDateEs(dateAt(hover.idx))}{hover.isProj?" · proyectado":""}</b>
-          {hover.val.toFixed(1)} kg
+          {hover.val.toFixed(decimals)}{unit}
         </div>
       )}
     </div>
 
     <div style={{display:"flex",gap:11,marginTop:8,marginBottom:2,fontSize:9.5,color:"rgba(232,245,232,.35)",flexWrap:"wrap"}}>
-      <span><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#4ade80",opacity:.5,marginRight:4}}/>Registrado</span>
-      <span><span style={{display:"inline-block",width:12,height:2,background:"#4ade80",marginRight:4,verticalAlign:"middle"}}/>Media móvil</span>
+      <span><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:color,opacity:.5,marginRight:4}}/>Registrado</span>
+      <span><span style={{display:"inline-block",width:12,height:2,background:color,marginRight:4,verticalAlign:"middle"}}/>Media móvil</span>
       <span><span style={{display:"inline-block",width:12,height:2,background:"repeating-linear-gradient(90deg,#a78bfa 0 4px,transparent 4px 7px)",marginRight:4,verticalAlign:"middle"}}/>Proyección</span>
       {target&&<span><span style={{display:"inline-block",width:12,height:2,background:"repeating-linear-gradient(90deg,rgba(232,245,232,.4) 0 3px,transparent 3px 6px)",marginRight:4,verticalAlign:"middle"}}/>Objetivo</span>}
     </div>
@@ -482,13 +530,13 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
       <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
         <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginBottom:2}}>Tendencia</div>
         <div style={{fontSize:13,fontWeight:800,color: trendWeek==null?"#e8f5e8":(trendWeek<=0?"#4ade80":"#f87171")}}>
-          {trendWeek==null?"—":`${trendWeek<=0?"":"+"}${trendWeek.toFixed(2)} kg/sem`}
+          {trendWeek==null?"—":`${trendWeek<=0?"":"+"}${trendWeek.toFixed(2)} ${unit}/sem`}
         </div>
       </div>
       <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
         <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginBottom:2}}>Este mes</div>
         <div style={{fontSize:13,fontWeight:800,color: thisMonth==null?"#e8f5e8":(thisMonth<=0?"#4ade80":"#f87171")}}>
-          {thisMonth==null?"—":`${thisMonth<=0?"":"+"}${thisMonth.toFixed(1)} kg`}
+          {thisMonth==null?"—":`${thisMonth<=0?"":"+"}${thisMonth.toFixed(decimals)}${unit}`}
         </div>
       </div>
       <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
@@ -499,11 +547,11 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
       </div>
     </div>
 
-    <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:12,padding:"10px 12px",marginTop:10,fontSize:11.5,lineHeight:1.55,color:"#d1fae5"}}>
+    <div style={{background:`${color}0f`,border:`1px solid ${color}26`,borderRadius:12,padding:"10px 12px",marginTop:10,fontSize:11.5,lineHeight:1.55,color:"#d1fae5"}}>
       {insight}
     </div>
 
-    <button onClick={()=>setShowTable(s=>!s)} style={{background:"none",border:"none",color:"#4ade80",fontSize:11,cursor:"pointer",padding:"8px 0 0"}}>
+    <button onClick={()=>setShowTable(s=>!s)} style={{background:"none",border:"none",color,fontSize:11,cursor:"pointer",padding:"8px 0 0"}}>
       {showTable?"Ocultar tabla":"Ver tabla"}
     </button>
     {showTable && (
@@ -511,7 +559,7 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
           <thead><tr>
             <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Fecha</th>
-            <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Peso</th>
+            <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>{tableLabel}</th>
             <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Media 7d</th>
           </tr></thead>
           <tbody>
@@ -520,8 +568,8 @@ function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
               const ma = maFull[idx]?.ma;
               return <tr key={p.date} style={{borderTop:"1px solid rgba(255,255,255,.05)"}}>
                 <td style={{padding:"6px 8px",color:"#e8f5e8"}}>{fmtDateEs(p.date)}</td>
-                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{p.w!=null?p.w.toFixed(1):"—"}</td>
-                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{ma!=null?ma.toFixed(1):"—"}</td>
+                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{p.w!=null?p.w.toFixed(decimals):"—"}</td>
+                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{ma!=null?ma.toFixed(decimals):"—"}</td>
               </tr>;
             }).reverse()}
           </tbody>
@@ -644,6 +692,7 @@ function App() {
   const [exerciseCatalog, setExerciseCatalog] = useState(DEFAULT_EXERCISE_CATALOG);
   const [weightUnit, setWeightUnit] = useState("kg");
   const [goalWeight, setGoalWeight] = useState("");
+  const [goalGrasa, setGoalGrasa] = useState("");
   const [newExerciseInputs, setNewExerciseInputs] = useState({});
   const [setGroupId, setSetGroupId] = useState(null);
   const [setExerciseName, setSetExerciseName] = useState("");
@@ -736,6 +785,7 @@ function App() {
         if (p.exerciseCatalog) setExerciseCatalog(p.exerciseCatalog);
         if (p.weightUnit) setWeightUnit(p.weightUnit);
         if (p.goalWeight) setGoalWeight(p.goalWeight);
+        if (p.goalGrasa) setGoalGrasa(p.goalGrasa);
       }
     } catch {}
     setSettingsLoaded(true);
@@ -746,34 +796,41 @@ function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa }));
   };
 
   const saveNotifConfig = (next) => {
     setNotifConfig(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa
     }));
   };
 
   const saveExerciseCatalog = (next) => {
     setExerciseCatalog(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit, goalWeight
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit, goalWeight, goalGrasa
     }));
   };
 
   const saveWeightUnit = (next) => {
     setWeightUnit(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next, goalWeight
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next, goalWeight, goalGrasa
     }));
   };
 
   const saveGoalWeight = (next) => {
     setGoalWeight(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight: next
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight: next, goalGrasa
+    }));
+  };
+
+  const saveGoalGrasa = (next) => {
+    setGoalGrasa(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa: next
     }));
   };
 
@@ -1600,7 +1657,7 @@ function App() {
     localStorage.setItem("gus_settings", JSON.stringify({
       kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
       macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat },
-      exerciseCatalog, weightUnit, goalWeight
+      exerciseCatalog, weightUnit, goalWeight, goalGrasa
     }));
   };
 
@@ -2268,107 +2325,19 @@ function App() {
           {(()=>{
             const imc = today.imc ? parseFloat(today.imc) : null;
             const sortedEntries = [...entries].sort((a,b)=>a.date.localeCompare(b.date));
-            const gData = sortedEntries.filter(e=>{
-              if(e.today?.grasa) return true;
-              if(e.feedback&&e.feedback.includes("Grasa corporal:")) return true;
-              return false;
-            }).slice(-30).map(e=>{
-              if(e.today?.grasa) return e;
-              const match = e.feedback?.match(/Grasa corporal: ([\d.]+)%/);
-              if(match) return {...e, today:{...e.today, grasa: match[1]}};
-              return e;
-            });
             const mData = sortedEntries.filter(e=>e.today?.masa_muscular).slice(-30);
             const totalProt = today.meals.reduce((s,m)=>s+(m.prot||0),0);
             const totalCarb = today.meals.reduce((s,m)=>s+(m.carb||0),0);
             const totalFat  = today.meals.reduce((s,m)=>s+(m.fat||0),0);
 
-            const MiniChart = ({data,key1,color,label,unit,decimals=1})=>{
-              const [tooltip, setTooltip] = useState(null);
-              if(data.length<2) return <p style={{color:"rgba(232,245,232,.22)",fontSize:11,textAlign:"center",padding:"10px 0"}}>Pocos datos</p>;
-              const vals = data.map(e=>parseFloat(e.today[key1])).filter(v=>v&&!isNaN(v));
-              if(!vals.length) return null;
-              const mn = Math.min(...vals)-0.5; const mx = Math.max(...vals)+0.5;
-              const first = vals[0]; const last = vals[vals.length-1];
-              const diff = (last-first).toFixed(decimals);
-              const diffColor = (key1==="weight"||key1==="grasa") ? (diff<0?"#4ade80":"#f87171") : (diff>0?"#4ade80":"#f87171");
-
-              // Trend line using linear regression
-              const n = vals.length;
-              const xMean = (n-1)/2;
-              const yMean = vals.reduce((s,v)=>s+v,0)/n;
-              const num = vals.reduce((s,v,i)=>s+(i-xMean)*(v-yMean),0);
-              const den = vals.reduce((s,_,i)=>s+(i-xMean)**2,0);
-              const slope = den!==0?num/den:0;
-              const intercept = yMean - slope*xMean;
-              const trendStart = intercept;
-              const trendEnd = slope*(n-1)+intercept;
-              const range = mx - mn;
-              const trendStartH = range > 0 ? 100 - (((trendStart-mn)/range)*80+10) : 50;
-              const trendEndH   = range > 0 ? 100 - (((trendEnd  -mn)/range)*80+10) : 50;
-
-              return <div style={{marginBottom:20}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <div style={g.sec}>{label}</div>
-                  <div style={{fontSize:11,color:diffColor,fontWeight:700}}>{diff>0?"+":""}{diff}{unit}</div>
-                </div>
-                <div style={{position:"relative",height:80}}>
-                  {/* Bars */}
-                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"flex-end",gap:2}}>
-                    {data.map((e,i)=>{
-                      const v=parseFloat(e.today[key1]); if(!v||isNaN(v)) return <div key={i} style={{flex:1}}/>;
-                      const range = mx - mn;
-                      const h = range > 0 ? Math.max(6, ((v - mn) / range) * 80 + 10) : 50;
-                      const isSelected=tooltip?.i===i;
-                      return <div key={i}
-                        onClick={()=>setTooltip(tooltip?.i===i?null:{i,v,date:e.date})}
-                        style={{flex:1,borderRadius:"2px 2px 0 0",minWidth:0,
-                          height:`${h}%`,
-                          background:isSelected?color:`${color}${tooltip?'44':'66'}`,
-                          cursor:"pointer",transition:"background .15s",
-                          outline:isSelected?`2px solid ${color}`:"none"}}/>;
-                    })}
-                  </div>
-                  {/* Trend line SVG overlay */}
-                  <svg style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
-                    <line
-                      x1="0%" y1={`${Math.min(95,Math.max(5,trendStartH))}%`}
-                      x2="100%" y2={`${Math.min(95,Math.max(5,trendEndH))}%`}
-                      stroke={color} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6"/>
-                  </svg>
-                  {/* Tooltip */}
-                  {tooltip&&(
-                    <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",
-                      background:"rgba(8,11,15,.95)",border:`1px solid ${color}`,borderRadius:8,
-                      padding:"5px 10px",fontSize:11,color:"#e8f5e8",whiteSpace:"nowrap",zIndex:10,pointerEvents:"none"}}>
-                      <span style={{color:color,fontWeight:700}}>{tooltip.v.toFixed(decimals)}{unit}</span>
-                      <span style={{color:"rgba(232,245,232,.4)",marginLeft:6}}>{tooltip.date?.slice(5)}</span>
-                    </div>
-                  )}
-                </div>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,alignItems:"center"}}>
-                  <span style={{fontSize:9,color:"rgba(232,245,232,.2)"}}>{data[0]?.date?.slice(5)}</span>
-                  <span style={{fontSize:9,color:"rgba(232,245,232,.35)",display:"flex",alignItems:"center",gap:4}}>
-                    <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke={color} strokeWidth="1.5" strokeDasharray="3 2" opacity="0.6"/></svg>
-                    tendencia
-                  </span>
-                  <span style={{fontSize:11,fontWeight:700,color:color}}>{last.toFixed(decimals)}{unit}</span>
-                </div>
-              </div>;
-            };
-
             return <>
               <div style={g.card}>
-                <WeightProgressChart entries={entries} todayStr={todayStr} goalWeight={goalWeight} g={g}/>
+                <MetricProgressChart entries={entries} todayStr={todayStr} target={parseFloat(goalWeight)||null} g={g}
+                  label="⚖️ Peso" tableLabel="Peso" unit="kg" color="#4ade80" decimals={1} getValue={getWeightValue}/>
               </div>
               <div style={g.card}>
-                <MiniChart data={gData} key1="grasa" color="#fb923c" label="🔥 % Grasa corporal — últimos 30 días" unit="%" decimals={1}/>
-                {gData.length>=2&&(()=>{
-                  const vals=gData.map(e=>parseFloat(e.today.grasa)).filter(Boolean);
-                  const first=vals[0]; const last=vals[vals.length-1];
-                  const perdida=(first-last).toFixed(1);
-                  return perdida>0?<div style={{fontSize:11,color:"#4ade80",marginTop:8}}>✅ Has bajado {perdida}% de grasa desde {gData[0]?.date?.slice(5)}</div>:null;
-                })()}
+                <MetricProgressChart entries={entries} todayStr={todayStr} target={parseFloat(goalGrasa)||null} g={g}
+                  label="🔥 % Grasa corporal" tableLabel="Grasa" unit="%" color="#fb923c" decimals={1} getValue={getGrasaValue}/>
               </div>
               {imc&&<div style={{...g.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div><div style={g.sec}>📐 IMC hoy</div><div style={{fontSize:28,fontWeight:900,color:imc<25?"#4ade80":imc<30?"#fbbf24":"#f87171"}}>{imc}</div></div>
@@ -2463,16 +2432,23 @@ function App() {
           </div>
 
           <div style={g.card}>
-            <div style={g.sec}>🎯 Peso objetivo</div>
+            <div style={g.sec}>🎯 Objetivos corporales</div>
             <div style={{fontSize:12,color:"rgba(232,245,232,.45)",marginBottom:12,lineHeight:1.5}}>
-              Se usa en Estadísticas para estimar cuándo llegarías a tu peso, con un margen realista en vez de una fecha exacta.
+              Se usan en Estadísticas para estimar cuándo llegarías a cada uno, con un margen realista en vez de una fecha exacta.
             </div>
-            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}>
+              <span style={{fontSize:12,color:"rgba(232,245,232,.55)",width:56,flexShrink:0}}>Peso</span>
               <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="76"
                 value={goalWeight} onChange={e=>setGoalWeight(e.target.value)}/>
               <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>kg</span>
             </div>
-            <button style={{...g.btnP,marginTop:12,marginBottom:0}} onClick={()=>saveGoalWeight(goalWeight)}>Guardar objetivo ✓</button>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:12,color:"rgba(232,245,232,.55)",width:56,flexShrink:0}}>Grasa</span>
+              <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="18"
+                value={goalGrasa} onChange={e=>setGoalGrasa(e.target.value)}/>
+              <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>%</span>
+            </div>
+            <button style={{...g.btnP,marginTop:12,marginBottom:0}} onClick={()=>{saveGoalWeight(goalWeight);saveGoalGrasa(goalGrasa);}}>Guardar objetivos ✓</button>
           </div>
 
           <div style={g.card}>
