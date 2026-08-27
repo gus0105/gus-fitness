@@ -120,6 +120,84 @@ function fmtSetVal(v) {
   return (v === "" || v === null || v === undefined) ? "-" : v;
 }
 
+// ---- Progreso de peso: media móvil, proyección con banda de incertidumbre e insight ----
+// (usado en Estadísticas → sección Peso)
+
+const DAY_MS = 86400000;
+
+// Serie diaria (con huecos) de los últimos `days` días naturales hasta hoy.
+// entries: [{ date:"YYYY-MM-DD", today:{ weight, ... } }]
+function buildWeightSeries(entries, days, todayStr) {
+  const todayD = new Date(todayStr + "T00:00:00");
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(todayD.getTime() - i * DAY_MS);
+    const dateStr = d.toISOString().split("T")[0];
+    const entry = entries.find(e => e.date === dateStr);
+    const w = entry?.today?.weight ? parseFloat(entry.today.weight) : null;
+    series.push({ date: dateStr, w: (w != null && !isNaN(w)) ? w : null });
+  }
+  return series;
+}
+
+// Media móvil de 7 días naturales: solo cuenta días con registro,
+// y exige al menos 2 registros en la ventana para dibujar el punto.
+function movingAverageSeries(series) {
+  return series.map((pt, idx) => {
+    let sum = 0, count = 0;
+    for (let k = Math.max(0, idx - 6); k <= idx; k++) {
+      if (series[k].w != null) { sum += series[k].w; count++; }
+    }
+    return { date: pt.date, ma: count >= 2 ? sum / count : null };
+  });
+}
+
+// Valor de media móvil no nulo más cercano a idx (para comparar periodos con huecos).
+function nearestMA(maSeries, idx) {
+  for (let d = 0; d < 10; d++) {
+    if (idx - d >= 0 && maSeries[idx - d]?.ma != null) return maSeries[idx - d].ma;
+    if (idx + d < maSeries.length && maSeries[idx + d]?.ma != null) return maSeries[idx + d].ma;
+  }
+  return null;
+}
+
+// Regresión lineal (mínimos cuadrados) sobre puntos {x,y}. Null si hay muy pocos puntos.
+function linearRegression(points) {
+  const n = points.length;
+  if (n < 5) return null;
+  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
+  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+  let sxy = 0, sxx = 0;
+  points.forEach(p => { sxy += (p.x - meanX) * (p.y - meanY); sxx += (p.x - meanX) * (p.x - meanX); });
+  if (sxx === 0) return null;
+  const slope = sxy / sxx;
+  const intercept = meanY - slope * meanX;
+  let resSq = 0;
+  points.forEach(p => { const r = p.y - (intercept + slope * p.x); resSq += r * r; });
+  const residStd = Math.sqrt(resSq / Math.max(1, n - 2));
+  const slopeStdErr = residStd / Math.sqrt(sxx);
+  return { slope, intercept, residStd, slopeStdErr, n };
+}
+
+// Ancho (± kg) de la banda de incertidumbre a `horizonDays` de hoy.
+// Heurística visual (crece con la distancia), no un intervalo estadístico estricto.
+function bandHalfWidth(reg, horizonDays) {
+  return reg.residStd * 0.7 + reg.slopeStdErr * 1.6 * horizonDays;
+}
+
+// Días (desde `lastIdx`) hasta que la recta de regresión cruza `target`. Null si no baja o no hay dato fiable.
+function daysToTarget(reg, lastIdx, target) {
+  if (!reg || reg.slope >= -0.0005) return null;
+  const h = (target - reg.intercept) / reg.slope - lastIdx;
+  return h > 0 ? h : null;
+}
+
+function fmtDateEs(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  return `${d.getDate()} ${MESES[d.getMonth()]}`;
+}
+
 const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], exercises: [], suppsTaken: [], kcal: 0 };
 
 // Adjunta el token de sesión de Supabase en toda llamada a /api,
@@ -239,6 +317,219 @@ function WeightCard({ saved, weight, grasa, imc, onSave, onEdit, g }) {
   );
 }
 
+// Progreso de peso: media móvil de 7 días, selector de rango, proyección con banda de
+// incertidumbre hasta el peso objetivo, comparativa de periodos e insight en texto.
+// Standalone (como WeightCard) para no remontarse y perder el rango/hover seleccionado en cada render.
+function WeightProgressChart({ entries, todayStr, goalWeight, g }) {
+  const [range, setRange] = useState(30);
+  const [hover, setHover] = useState(null);
+  const [showTable, setShowTable] = useState(false);
+
+  const FULL_DAYS = 90;
+  const lastIdx = FULL_DAYS - 1;
+  const fullSeries = buildWeightSeries(entries, FULL_DAYS, todayStr);
+  const maFull = movingAverageSeries(fullSeries);
+
+  const REG_WINDOW = 21;
+  const regPoints = maFull
+    .map((pt, idx) => ({ idx, ma: pt.ma }))
+    .filter(p => p.idx >= lastIdx - (REG_WINDOW - 1) && p.ma != null)
+    .map(p => ({ x: p.idx, y: p.ma }));
+  const reg = linearRegression(regPoints);
+
+  const target = parseFloat(goalWeight) || null;
+  const PROJECTION_DAYS = 30;
+  // Más allá de ~1 año no es una predicción útil, es ruido con forma de fecha — se descarta.
+  const MAX_HORIZON_DAYS = 365;
+  const capHorizon = h => (h != null && h <= MAX_HORIZON_DAYS) ? h : null;
+  const hCentral = capHorizon((target && reg) ? daysToTarget(reg, lastIdx, target) : null);
+  const hOpt     = capHorizon((target && reg) ? daysToTarget({ ...reg, slope: reg.slope - reg.slopeStdErr }, lastIdx, target) : null);
+  const hPess    = capHorizon((target && reg) ? daysToTarget({ ...reg, slope: reg.slope + reg.slopeStdErr }, lastIdx, target) : null);
+
+  const rawCount = fullSeries.filter(p => p.w != null).length;
+  if (rawCount < 2) {
+    return <p style={{ color:"rgba(232,245,232,.22)", fontSize:12, textAlign:"center", padding:"12px 0" }}>Registra al menos 2 días</p>;
+  }
+
+  const startIdx = Math.max(0, lastIdx - (range - 1));
+  const endIdx = lastIdx + PROJECTION_DAYS;
+
+  const dotPts = fullSeries.map((p, idx) => ({ idx, y: p.w })).filter(p => p.idx >= startIdx && p.y != null);
+  const maPts = maFull.map((p, idx) => ({ idx, y: p.ma })).filter(p => p.idx >= startIdx && p.y != null);
+  const projPts = reg ? Array.from({ length: PROJECTION_DAYS + 1 }, (_, h) => ({ idx: lastIdx + h, y: reg.intercept + reg.slope * (lastIdx + h) })) : [];
+  const bandUp = reg ? projPts.map(p => ({ idx: p.idx, y: p.y + bandHalfWidth(reg, p.idx - lastIdx) })) : [];
+  const bandDown = reg ? projPts.map(p => ({ idx: p.idx, y: p.y - bandHalfWidth(reg, p.idx - lastIdx) })) : [];
+
+  let ys = [...dotPts, ...maPts, ...projPts, ...bandUp, ...bandDown].map(p => p.y);
+  if (target) ys.push(target);
+  if (!ys.length) ys = [70, 80];
+  const yMin = Math.min(...ys) - 0.5, yMax = Math.max(...ys) + 0.5;
+
+  const W = 400, H = 220, LEFT = 30, RIGHT = 6, TOP = 10, BOTTOM = 20;
+  const PLOT_W = W - LEFT - RIGHT, PLOT_H = H - TOP - BOTTOM;
+  const xS = idx => LEFT + ((idx - startIdx) / (endIdx - startIdx)) * PLOT_W;
+  const yS = v => TOP + ((yMax - v) / (yMax - yMin)) * PLOT_H;
+
+  const dateAt = idx => {
+    const d = new Date(todayStr + "T00:00:00");
+    d.setDate(d.getDate() - (lastIdx - idx));
+    return d.toISOString().split("T")[0];
+  };
+
+  const gridStep = (yMax - yMin) > 9 ? 2 : 1;
+  const gridVals = [];
+  for (let v = Math.ceil(yMin); v <= Math.floor(yMax); v += gridStep) gridVals.push(v);
+
+  const maPath = maPts.length ? "M " + maPts.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") : "";
+  const projPath = projPts.length ? "M " + projPts.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") : "";
+  const bandPath = bandUp.length
+    ? "M " + bandUp.map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") + " L " + bandDown.slice().reverse().map(p => `${xS(p.idx)} ${yS(p.y)}`).join(" L ") + " Z"
+    : "";
+
+  // Tendencia de la ventana visible (kg/semana)
+  const aMA = nearestMA(maFull, startIdx), bMA = nearestMA(maFull, lastIdx);
+  const trendWeek = (aMA != null && bMA != null && lastIdx > startIdx) ? ((bMA - aMA) / (lastIdx - startIdx)) * 7 : null;
+
+  // Comparativa: últimos 30 días vs los 30 anteriores
+  const tmA = nearestMA(maFull, lastIdx), tmB = nearestMA(maFull, Math.max(0, lastIdx - 30));
+  const thisMonth = (tmA != null && tmB != null) ? tmA - tmB : null;
+  const lmA = nearestMA(maFull, Math.max(0, lastIdx - 30)), lmB = nearestMA(maFull, Math.max(0, lastIdx - 60));
+  const lastMonth = (lmA != null && lmB != null) ? lmA - lmB : null;
+
+  const w21 = reg ? reg.slope * 7 : null;
+  const w14 = (() => {
+    const a = nearestMA(maFull, lastIdx - 13), b = nearestMA(maFull, lastIdx);
+    return (a != null && b != null) ? ((b - a) / 13) * 7 : null;
+  })();
+  const slowdown = (w21 != null && w14 != null) && Math.abs(w14) < Math.abs(w21) * 0.55;
+
+  let insight = "";
+  if (w21 != null) {
+    insight += `En las últimas 3 semanas ${w21 <= 0 ? "bajas" : "subes"} de media ${Math.abs(w21).toFixed(2)} kg/semana. `;
+    if (slowdown) insight += `En los últimos 14 días el ritmo se ha frenado (${Math.abs(w14).toFixed(2)} kg/semana) — vigila si se convierte en estancamiento real. `;
+  } else {
+    insight += "Todavía no hay suficientes registros recientes para calcular un ritmo fiable. ";
+  }
+  if (target && w21 != null) {
+    if (hCentral != null) {
+      const dC = dateAt(Math.round(lastIdx + hCentral));
+      insight += `A este paso llegarías a ${target} kg hacia el ${fmtDateEs(dC)}` +
+        (hOpt != null && hPess != null ? `, entre el ${fmtDateEs(dateAt(Math.round(lastIdx + hOpt)))} y el ${fmtDateEs(dateAt(Math.round(lastIdx + hPess)))}.` : ".");
+    } else {
+      insight += "Con el ritmo actual, la fecha objetivo no sería fiable todavía.";
+    }
+  }
+
+  function onMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * W;
+    let idx = Math.round(startIdx + ((svgX - LEFT) / PLOT_W) * (endIdx - startIdx));
+    idx = Math.max(startIdx, Math.min(endIdx, idx));
+    const isProj = idx > lastIdx;
+    const val = isProj ? (reg ? reg.intercept + reg.slope * idx : null) : nearestMA(maFull, idx);
+    if (val == null) { setHover(null); return; }
+    setHover({ idx, val, isProj });
+  }
+
+  return <>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:8}}>
+      <div style={g.sec}>⚖️ Peso</div>
+      <div style={{display:"flex",gap:6}}>
+        {[[14,"2 sem"],[30,"1 mes"],[90,"todo"]].map(([d,lbl])=>(
+          <button key={d} onClick={()=>setRange(d)}
+            style={{fontSize:10.5,fontWeight:600,padding:"5px 10px",borderRadius:99,cursor:"pointer",
+              border: range===d?"1px solid #4ade80":"1px solid rgba(255,255,255,.1)",
+              background: range===d?"rgba(74,222,128,.15)":"rgba(255,255,255,.03)",
+              color: range===d?"#4ade80":"rgba(232,245,232,.45)"}}>{lbl}</button>
+        ))}
+      </div>
+    </div>
+
+    <div style={{position:"relative"}}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}} onMouseMove={onMove} onMouseLeave={()=>setHover(null)}>
+        {gridVals.map(v=>(
+          <g key={v}>
+            <line x1={LEFT} x2={W-RIGHT} y1={yS(v)} y2={yS(v)} stroke="rgba(255,255,255,.06)" strokeWidth="1"/>
+            <text x={2} y={yS(v)+3} fontSize="8.5" fill="rgba(232,245,232,.3)">{v}</text>
+          </g>
+        ))}
+        {target && <line x1={LEFT} x2={W-RIGHT} y1={yS(target)} y2={yS(target)} stroke="rgba(232,245,232,.35)" strokeWidth="1" strokeDasharray="2 4"/>}
+        {bandPath && <path d={bandPath} fill="rgba(167,139,250,.14)" stroke="none"/>}
+        <line x1={xS(lastIdx)} x2={xS(lastIdx)} y1={TOP} y2={H-BOTTOM} stroke="rgba(255,255,255,.15)" strokeWidth="1"/>
+        {projPath && <path d={projPath} fill="none" stroke="#a78bfa" strokeWidth="2" strokeDasharray="5 4" strokeLinecap="round"/>}
+        {dotPts.map(p=><circle key={p.idx} cx={xS(p.idx)} cy={yS(p.y)} r="2" fill="#4ade80" opacity="0.4"/>)}
+        {maPath && <path d={maPath} fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>}
+        {maPts.length>0 && <circle cx={xS(maPts[maPts.length-1].idx)} cy={yS(maPts[maPts.length-1].y)} r="4" fill="#4ade80" stroke="#0a0a0f" strokeWidth="2"/>}
+        {hover && <line x1={xS(hover.idx)} x2={xS(hover.idx)} y1={TOP} y2={H-BOTTOM} stroke="rgba(255,255,255,.25)" strokeWidth="1"/>}
+      </svg>
+      {hover && (
+        <div style={{position:"absolute",left:`${(xS(hover.idx)/W)*100}%`,top:`${(yS(hover.val)/H)*100}%`,transform:"translate(-50%,-130%)",
+          background:"#0a0a0f",border:"1px solid rgba(74,222,128,.3)",borderRadius:8,padding:"5px 9px",fontSize:11,color:"#e8f5e8",whiteSpace:"nowrap",pointerEvents:"none",zIndex:5}}>
+          <b style={{display:"block",fontSize:9,color:"rgba(232,245,232,.4)",fontWeight:600}}>{fmtDateEs(dateAt(hover.idx))}{hover.isProj?" · proyectado":""}</b>
+          {hover.val.toFixed(1)} kg
+        </div>
+      )}
+    </div>
+
+    <div style={{display:"flex",gap:11,marginTop:8,marginBottom:2,fontSize:9.5,color:"rgba(232,245,232,.35)",flexWrap:"wrap"}}>
+      <span><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#4ade80",opacity:.5,marginRight:4}}/>Registrado</span>
+      <span><span style={{display:"inline-block",width:12,height:2,background:"#4ade80",marginRight:4,verticalAlign:"middle"}}/>Media móvil</span>
+      <span><span style={{display:"inline-block",width:12,height:2,background:"repeating-linear-gradient(90deg,#a78bfa 0 4px,transparent 4px 7px)",marginRight:4,verticalAlign:"middle"}}/>Proyección</span>
+      {target&&<span><span style={{display:"inline-block",width:12,height:2,background:"repeating-linear-gradient(90deg,rgba(232,245,232,.4) 0 3px,transparent 3px 6px)",marginRight:4,verticalAlign:"middle"}}/>Objetivo</span>}
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginTop:12}}>
+      <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
+        <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginBottom:2}}>Tendencia</div>
+        <div style={{fontSize:13,fontWeight:800,color: trendWeek==null?"#e8f5e8":(trendWeek<=0?"#4ade80":"#f87171")}}>
+          {trendWeek==null?"—":`${trendWeek<=0?"":"+"}${trendWeek.toFixed(2)} kg/sem`}
+        </div>
+      </div>
+      <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
+        <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginBottom:2}}>Este mes</div>
+        <div style={{fontSize:13,fontWeight:800,color: thisMonth==null?"#e8f5e8":(thisMonth<=0?"#4ade80":"#f87171")}}>
+          {thisMonth==null?"—":`${thisMonth<=0?"":"+"}${thisMonth.toFixed(1)} kg`}
+        </div>
+      </div>
+      <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"9px 8px"}}>
+        <div style={{fontSize:9,color:"rgba(232,245,232,.35)",marginBottom:2}}>Objetivo</div>
+        <div style={{fontSize:13,fontWeight:800,color:"#e8f5e8"}}>
+          {!target ? "sin fijar" : hCentral==null ? "sin fecha" : `≈ ${fmtDateEs(dateAt(Math.round(lastIdx+hCentral)))}`}
+        </div>
+      </div>
+    </div>
+
+    <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:12,padding:"10px 12px",marginTop:10,fontSize:11.5,lineHeight:1.55,color:"#d1fae5"}}>
+      {insight}
+    </div>
+
+    <button onClick={()=>setShowTable(s=>!s)} style={{background:"none",border:"none",color:"#4ade80",fontSize:11,cursor:"pointer",padding:"8px 0 0"}}>
+      {showTable?"Ocultar tabla":"Ver tabla"}
+    </button>
+    {showTable && (
+      <div style={{maxHeight:180,overflowY:"auto",marginTop:6,border:"1px solid rgba(255,255,255,.07)",borderRadius:10}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+          <thead><tr>
+            <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Fecha</th>
+            <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Peso</th>
+            <th style={{textAlign:"left",padding:"6px 8px",color:"rgba(232,245,232,.35)",fontWeight:600,position:"sticky",top:0,background:"#0e1512"}}>Media 7d</th>
+          </tr></thead>
+          <tbody>
+            {fullSeries.slice(startIdx).map((p,i)=>{
+              const idx = startIdx+i;
+              const ma = maFull[idx]?.ma;
+              return <tr key={p.date} style={{borderTop:"1px solid rgba(255,255,255,.05)"}}>
+                <td style={{padding:"6px 8px",color:"#e8f5e8"}}>{fmtDateEs(p.date)}</td>
+                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{p.w!=null?p.w.toFixed(1):"—"}</td>
+                <td style={{padding:"6px 8px",color:"rgba(232,245,232,.6)"}}>{ma!=null?ma.toFixed(1):"—"}</td>
+              </tr>;
+            }).reverse()}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </>;
+}
 
 const BADGES = [
   { id:"streak7",   days:7,   icon:"🔥", label:"Una semana",     desc:"7 días seguidos registrando" },
@@ -352,6 +643,7 @@ function App() {
   const [editingExerciseId, setEditingExerciseId] = useState(null);
   const [exerciseCatalog, setExerciseCatalog] = useState(DEFAULT_EXERCISE_CATALOG);
   const [weightUnit, setWeightUnit] = useState("kg");
+  const [goalWeight, setGoalWeight] = useState("");
   const [newExerciseInputs, setNewExerciseInputs] = useState({});
   const [setGroupId, setSetGroupId] = useState(null);
   const [setExerciseName, setSetExerciseName] = useState("");
@@ -443,6 +735,7 @@ function App() {
         if (p.macroGoals) setMacroGoals(p.macroGoals);
         if (p.exerciseCatalog) setExerciseCatalog(p.exerciseCatalog);
         if (p.weightUnit) setWeightUnit(p.weightUnit);
+        if (p.goalWeight) setGoalWeight(p.goalWeight);
       }
     } catch {}
     setSettingsLoaded(true);
@@ -453,27 +746,34 @@ function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight }));
   };
 
   const saveNotifConfig = (next) => {
     setNotifConfig(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight
     }));
   };
 
   const saveExerciseCatalog = (next) => {
     setExerciseCatalog(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit, goalWeight
     }));
   };
 
   const saveWeightUnit = (next) => {
     setWeightUnit(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next, goalWeight
+    }));
+  };
+
+  const saveGoalWeight = (next) => {
+    setGoalWeight(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight: next
     }));
   };
 
@@ -1300,7 +1600,7 @@ function App() {
     localStorage.setItem("gus_settings", JSON.stringify({
       kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
       macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat },
-      exerciseCatalog, weightUnit
+      exerciseCatalog, weightUnit, goalWeight
     }));
   };
 
@@ -1968,7 +2268,6 @@ function App() {
           {(()=>{
             const imc = today.imc ? parseFloat(today.imc) : null;
             const sortedEntries = [...entries].sort((a,b)=>a.date.localeCompare(b.date));
-            const wData = sortedEntries.filter(e=>e.today?.weight).slice(-30);
             const gData = sortedEntries.filter(e=>{
               if(e.today?.grasa) return true;
               if(e.feedback&&e.feedback.includes("Grasa corporal:")) return true;
@@ -2060,7 +2359,7 @@ function App() {
 
             return <>
               <div style={g.card}>
-                <MiniChart data={wData} key1="weight" color="#4ade80" label="⚖️ Peso — últimos 30 días" unit="kg"/>
+                <WeightProgressChart entries={entries} todayStr={todayStr} goalWeight={goalWeight} g={g}/>
               </div>
               <div style={g.card}>
                 <MiniChart data={gData} key1="grasa" color="#fb923c" label="🔥 % Grasa corporal — últimos 30 días" unit="%" decimals={1}/>
@@ -2161,6 +2460,19 @@ function App() {
               <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>kcal</span>
             </div>
             <button style={{...g.btnP,marginTop:12,marginBottom:0}} onClick={()=>saveSettings(kcalGoal,null)}>Guardar objetivo ✓</button>
+          </div>
+
+          <div style={g.card}>
+            <div style={g.sec}>🎯 Peso objetivo</div>
+            <div style={{fontSize:12,color:"rgba(232,245,232,.45)",marginBottom:12,lineHeight:1.5}}>
+              Se usa en Estadísticas para estimar cuándo llegarías a tu peso, con un margen realista en vez de una fecha exacta.
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <input style={{...g.inp,marginBottom:0,flex:1}} type="number" inputMode="decimal" placeholder="76"
+                value={goalWeight} onChange={e=>setGoalWeight(e.target.value)}/>
+              <span style={{color:"rgba(232,245,232,.4)",fontSize:13}}>kg</span>
+            </div>
+            <button style={{...g.btnP,marginTop:12,marginBottom:0}} onClick={()=>saveGoalWeight(goalWeight)}>Guardar objetivo ✓</button>
           </div>
 
           <div style={g.card}>
