@@ -346,7 +346,19 @@ function MetricProgressChart({ entries, todayStr, target, g, label, tableLabel, 
   const [hover, setHover] = useState(null);
   const [showTable, setShowTable] = useState(false);
 
-  const FULL_DAYS = 90;
+  // El histórico del usuario puede ser más largo que 90 días: si "todo" se queda fijo
+  // en 90, cualquier dato más antiguo (aunque sí se cargó de Supabase) nunca llega a
+  // construirse en la serie y desaparece del todo de la gráfica, aunque exista.
+  const todayD0 = new Date(todayStr + "T00:00:00");
+  let earliestD = null;
+  for (const e of entries) {
+    if (getValue(e) != null) {
+      const d = new Date(e.date + "T00:00:00");
+      if (!earliestD || d < earliestD) earliestD = d;
+    }
+  }
+  const historyDays = earliestD ? Math.round((todayD0 - earliestD) / DAY_MS) + 1 : 90;
+  const FULL_DAYS = Math.min(Math.max(historyDays, 90), 1095); // entre 90 días y ~3 años
   const lastIdx = FULL_DAYS - 1;
   const fullSeries = buildMetricSeries(entries, FULL_DAYS, todayStr, getValue);
   const maFull = movingAverageSeries(fullSeries);
@@ -476,7 +488,7 @@ function MetricProgressChart({ entries, todayStr, target, g, label, tableLabel, 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:8}}>
       <div style={g.sec}>{label}</div>
       <div style={{display:"flex",gap:6}}>
-        {[[14,"2 sem"],[30,"1 mes"],[90,"todo"]].map(([d,lbl])=>(
+        {[[14,"2 sem"],[30,"1 mes"],[FULL_DAYS,"todo"]].map(([d,lbl])=>(
           <button key={d} onClick={()=>setRange(d)}
             style={{fontSize:10.5,fontWeight:600,padding:"5px 10px",borderRadius:99,cursor:"pointer",
               border: range===d?`1px solid ${color}`:"1px solid rgba(255,255,255,.1)",
@@ -928,15 +940,16 @@ function App() {
     loadingRef.current = true;
     const currentToday = getTodayStr();
     try {
-      const ninetyDaysAgo = new Date();
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-      const fromDate = ninetyDaysAgo.toISOString().split("T")[0];
+      // Antes esto se limitaba a los últimos 90 días (.gte("date", fromDate)), lo que
+      // hacía que cualquier entrada más antigua nunca llegara a `entries` ni al caché:
+      // no era solo que la gráfica no la mostrara, es que la app entera no la cargaba.
+      // El límite de filas es solo un tope de seguridad (~10 años de registro diario).
       const { data, error } = await supabase
         .from("entries")
         .select("*")
         .eq("user_id", userId)
-        .gte("date", fromDate)
-        .order("date", { ascending: true });
+        .order("date", { ascending: true })
+        .limit(3650);
       if (!error && data) {
         const allEntries = data.map(r => {
           let tod = r.data;
