@@ -237,9 +237,20 @@ async function callClaude(userPrompt) {
   return json.text ?? "Sin respuesta.";
 }
 
-// Valores para las ruletas de peso (múltiplos de 2.5) y repeticiones
-const WEIGHT_WHEEL_VALUES = Array.from({ length: 121 }, (_, i) => Math.round(i * 2.5 * 10) / 10); // 0 a 300 de 2.5 en 2.5
+// Valores para la ruleta de repeticiones
 const REPS_WHEEL_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1 a 30
+
+// Salto de peso por defecto (kg) para cualquier ejercicio sin uno propio guardado —
+// el mismo 2.5 que se usaba fijo antes de poder personalizarlo por ejercicio.
+const DEFAULT_WEIGHT_STEP = 2.5;
+const WEIGHT_STEP_OPTIONS = [1, 2.5, 5, 10];
+
+// Genera los valores de la ruleta de peso para un salto dado: press banca puede ir
+// de 5 en 5, elevaciones laterales de 1 en 1... 0 a 300kg cubre de sobra cualquier caso.
+function buildWeightWheelValues(step) {
+  const count = Math.floor(300 / step) + 1;
+  return Array.from({ length: count }, (_, i) => Math.round(i * step * 100) / 100);
+}
 
 // Ruleta seleccionable estilo iOS: se desliza verticalmente y el valor centrado
 // (entre las dos líneas) es el seleccionado. Aislado como componente fuera de App
@@ -247,7 +258,12 @@ const REPS_WHEEL_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1 a 30
 function WheelPicker({ values, value, onChange, itemHeight = 40, visibleCount = 5, color = "#4ade80" }) {
   const containerRef = useRef(null);
   const debounceRef = useRef(null);
-  const initialIdx = Math.max(0, values.indexOf(value));
+  // Si `value` no está exactamente en `values` (p.ej. un peso guardado con un salto
+  // distinto al configurado ahora para el ejercicio), cae al más cercano en vez de
+  // saltar al principio de la ruleta — así nunca queda visualmente desincronizada.
+  const exactIdx = values.indexOf(value);
+  const initialIdx = exactIdx >= 0 ? exactIdx : values.reduce((best, v, i) =>
+    Math.abs(v - value) < Math.abs(values[best] - value) ? i : best, 0);
   const [centerIdx, setCenterIdx] = useState(initialIdx);
   const containerHeight = itemHeight * visibleCount;
   const padding = (containerHeight - itemHeight) / 2;
@@ -702,6 +718,10 @@ function App() {
   const [exSets, setExSets]       = useState([{ weight:"", reps:"" }]);
   const [editingExerciseId, setEditingExerciseId] = useState(null);
   const [exerciseCatalog, setExerciseCatalog] = useState(DEFAULT_EXERCISE_CATALOG);
+  // Salto de peso (kg) por ejercicio: press banca puede ir de 5 en 5, elevaciones
+  // laterales de 1 en 1... Clave = nombre exacto del ejercicio (mismo criterio que
+  // exerciseCatalog). Sin entrada propia, se usa DEFAULT_WEIGHT_STEP.
+  const [exerciseWeightStep, setExerciseWeightStep] = useState({});
   const [weightUnit, setWeightUnit] = useState("kg");
   const [goalWeight, setGoalWeight] = useState("");
   const [goalGrasa, setGoalGrasa] = useState("");
@@ -712,6 +732,7 @@ function App() {
   const [setWeight, setSetWeight] = useState(0);
   const [setReps, setSetReps] = useState(8);
   const [setUnit, setSetUnit] = useState("kg");
+  const [setSaveFlash, setSetSaveFlash] = useState(false); // confirmación breve al guardar una serie sin salir de la pantalla
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -745,6 +766,7 @@ function App() {
   const [analyzingPhoto, setAnPh]   = useState(false);
   const fileRef = useRef(null);
   const chatEnd = useRef(null);
+  const saveSetFlashTimer = useRef(null);
 
   const touchRef = useRef(null);
 
@@ -795,6 +817,7 @@ function App() {
         if (p.userProfile) setUserProfile(p.userProfile);
         if (p.macroGoals) setMacroGoals(p.macroGoals);
         if (p.exerciseCatalog) setExerciseCatalog(p.exerciseCatalog);
+        if (p.exerciseWeightStep) setExerciseWeightStep(p.exerciseWeightStep);
         if (p.weightUnit) setWeightUnit(p.weightUnit);
         if (p.goalWeight) setGoalWeight(p.goalWeight);
         if (p.goalGrasa) setGoalGrasa(p.goalGrasa);
@@ -808,41 +831,48 @@ function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa }));
   };
 
   const saveNotifConfig = (next) => {
     setNotifConfig(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
     }));
   };
 
   const saveExerciseCatalog = (next) => {
     setExerciseCatalog(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, weightUnit, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
+    }));
+  };
+
+  const saveExerciseWeightStep = (next) => {
+    setExerciseWeightStep(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep: next, weightUnit, goalWeight, goalGrasa
     }));
   };
 
   const saveWeightUnit = (next) => {
     setWeightUnit(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit: next, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit: next, goalWeight, goalGrasa
     }));
   };
 
   const saveGoalWeight = (next) => {
     setGoalWeight(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight: next, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight: next, goalGrasa
     }));
   };
 
   const saveGoalGrasa = (next) => {
     setGoalGrasa(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, weightUnit, goalWeight, goalGrasa: next
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa: next
     }));
   };
 
@@ -1439,12 +1469,22 @@ function App() {
     setSetExerciseName(name);
     setNewQuickExercise("");
     const lastSet = lastEx?.sets?.[lastEx.sets.length-1];
-    setSetWeight(lastSet?.weight ?? 0);
+    // Encaja el peso precargado en el salto configurado para este ejercicio — si se
+    // registró con un salto distinto al actual (p.ej. se cambió a mitad de sesión),
+    // la ruleta no encontraría el valor exacto y se quedaría desincronizada.
+    const stepForName = exerciseWeightStep[name] || DEFAULT_WEIGHT_STEP;
+    const rawWeight = lastSet?.weight ?? 0;
+    setSetWeight(Math.max(0, Math.round(Math.round(rawWeight/stepForName)*stepForName*100)/100));
     setSetReps(lastSet?.reps ?? 8);
     setSetUnit(lastSet?.unit || weightUnit);
     setScreen("addSet");
   };
 
+  // Guarda la serie y se queda en la propia pantalla de "añadir serie" — antes
+  // volvía a inicio (setScreen("home")), obligando a un viaje de ida y vuelta
+  // completo por cada serie durante el entreno. Ahora el peso/reps se quedan
+  // tal cual (listos para repetir carga con un solo toque) y basta con tocar
+  // "Guardar serie" otra vez para la siguiente.
   const saveSet = () => {
     const name = (setExerciseName || newQuickExercise).trim();
     if (!name) return;
@@ -1461,7 +1501,13 @@ function App() {
     const curGroups = today.muscleGroups||[];
     const newGroups = curGroups.includes(setGroupId) ? curGroups : [...curGroups, setGroupId];
     setT({ exercises: newList, muscleGroups: newGroups });
-    setScreen("home");
+    // Si era un ejercicio nuevo escrito a mano, queda seleccionado como chip
+    // (ya se añadió al catálogo arriba) en vez de dejar el input a medias.
+    setSetExerciseName(name);
+    setNewQuickExercise("");
+    setSetSaveFlash(true);
+    clearTimeout(saveSetFlashTimer.current);
+    saveSetFlashTimer.current = setTimeout(() => setSetSaveFlash(false), 1400);
   };
 
   const buildContext = () => {
@@ -1670,7 +1716,7 @@ function App() {
     localStorage.setItem("gus_settings", JSON.stringify({
       kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
       macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat },
-      exerciseCatalog, weightUnit, goalWeight, goalGrasa
+      exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
     }));
   };
 
@@ -2233,12 +2279,42 @@ function App() {
         {screen==="addSet"&&(()=>{
           const groupInfo = MUSCLE_GROUPS.find(m=>m.id===setGroupId);
           const catalogList = exerciseCatalog[setGroupId]||[];
+          // Series ya registradas hoy, agrupadas por grupo muscular — para verlas
+          // sin salir de esta pantalla (antes había que volver a inicio para eso).
+          const todaySetGroups = (today.exercises||[]).filter(ex=>ex.muscleGroup && ex.sets?.length);
+          const todaySetsCount = todaySetGroups.reduce((n,ex)=>n+ex.sets.length,0);
+          // Salto de peso: por ejercicio (press banca de 5 en 5, elevaciones laterales
+          // de 1 en 1...). Sin ejercicio elegido todavía, se usa el salto por defecto.
+          const currentExName = (setExerciseName || newQuickExercise).trim();
+          const weightStep = exerciseWeightStep[currentExName] || DEFAULT_WEIGHT_STEP;
+          const weightValues = buildWeightWheelValues(weightStep);
+          const changeWeightStep = (step) => {
+            if (!currentExName) return;
+            saveExerciseWeightStep({ ...exerciseWeightStep, [currentExName]: step });
+            setSetWeight(Math.max(0, Math.round((Math.round(setWeight/step)*step)*100)/100));
+          };
           return <>
-            <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
+            <button style={g.back} onClick={()=>setScreen("home")}>← Salir</button>
             <div style={{marginTop:6}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
                 {groupInfo&&<div style={{width:26,height:26,borderRadius:"50%",background:`${groupInfo.color}33`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:groupInfo.abbr.length>2?14:11,fontWeight:800,color:groupInfo.color,flexShrink:0}}>{groupInfo.abbr}</div>}
                 <div style={{fontSize:18,fontWeight:900}}>Serie de {groupInfo?.label||""}</div>
+              </div>
+
+              {/* Cambiar de grupo muscular sin volver a inicio (ej. superseries) */}
+              <div style={{display:"flex",gap:6,overflowX:"auto",margin:"0 -18px 18px",padding:"0 18px 4px",WebkitOverflowScrolling:"touch"}}>
+                {MUSCLE_GROUPS.filter(m=>m.id!=="descanso").map(m=>{
+                  const active = m.id===setGroupId;
+                  return <div key={m.id} onClick={()=>openAddSet(m.id)} style={{
+                    flexShrink:0,width:36,height:36,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:m.abbr.length>2?13:10,fontWeight:800,cursor:"pointer",
+                    border:`1.5px solid ${m.color}`,color:m.color,
+                    background:active?`${m.color}4d`:`${m.color}1f`,
+                    opacity:active?1:0.55,
+                    boxShadow:active?`0 0 0 3px ${m.color}33`:"none",
+                    transition:"all .15s",
+                  }}>{m.abbr}</div>;
+                })}
               </div>
 
               <label style={g.lbl}>Ejercicio</label>
@@ -2266,16 +2342,67 @@ function App() {
                   ))}
                 </div>
               </div>
+
+              {/* Salto de la ruleta de peso, guardado por ejercicio — press banca de 5
+                  en 5, elevaciones laterales de 1 en 1, etc. */}
+              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
+                <span style={{fontSize:10,color:"rgba(232,245,232,.35)",flexShrink:0}}>Salto</span>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {WEIGHT_STEP_OPTIONS.map(step=>(
+                    <button key={step} disabled={!currentExName} onClick={()=>changeWeightStep(step)} style={{
+                      padding:"3px 10px",borderRadius:99,fontSize:10.5,fontWeight:700,cursor:currentExName?"pointer":"default",
+                      border: weightStep===step?`1px solid ${groupInfo?.color||"#4ade80"}`:"1px solid rgba(255,255,255,.1)",
+                      background: weightStep===step?`${groupInfo?.color||"#4ade80"}22`:"rgba(255,255,255,.03)",
+                      color: weightStep===step?(groupInfo?.color||"#4ade80"):"rgba(232,245,232,.35)",
+                      opacity:currentExName?1:0.4,
+                    }}>{step}kg</button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{marginBottom:18}}>
-                <WheelPicker values={WEIGHT_WHEEL_VALUES} value={setWeight} onChange={setSetWeight} color={groupInfo?.color||"#4ade80"}/>
+                {/* key: WheelPicker solo sincroniza su scroll con `value` al montarse (ver su propio
+                    comentario) — antes era seguro porque la pantalla se remontaba entera en cada
+                    visita. Ahora que addSet se queda abierta entre series, cambiar de grupo (chips
+                    de arriba) o de salto de peso sí puede cambiar `setWeight`/las opciones bajo la
+                    ruleta ya montada; forzamos el remonte solo en esos casos para que no se
+                    quede desincronizada. */}
+                <WheelPicker key={`w-${setGroupId}-${setExerciseName}-${weightStep}`} values={weightValues} value={setWeight} onChange={setSetWeight} color={groupInfo?.color||"#4ade80"}/>
               </div>
 
               <label style={g.lbl}>Repeticiones</label>
               <div style={{marginBottom:18}}>
-                <WheelPicker values={REPS_WHEEL_VALUES} value={setReps} onChange={setSetReps} color={groupInfo?.color||"#4ade80"}/>
+                <WheelPicker key={`r-${setGroupId}-${setExerciseName}`} values={REPS_WHEEL_VALUES} value={setReps} onChange={setSetReps} color={groupInfo?.color||"#4ade80"}/>
               </div>
 
               <button style={g.btnP} onClick={saveSet}>Guardar serie ✓</button>
+              {setSaveFlash&&(
+                <div style={{textAlign:"center",fontSize:12,fontWeight:700,color:groupInfo?.color||"#4ade80",marginTop:-4,marginBottom:16,transition:"opacity .2s"}}>
+                  Serie guardada ✓ — sigues aquí, añade la siguiente
+                </div>
+              )}
+
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:9,marginTop:8}}>
+                <div style={{fontSize:9,fontWeight:800,letterSpacing:".16em",textTransform:"uppercase",color:"rgba(232,245,232,.3)"}}>Series de hoy</div>
+                {todaySetsCount>0&&<span style={{fontSize:10,fontWeight:700,color:"#4ade80"}}>{todaySetsCount}</span>}
+              </div>
+              {todaySetGroups.length===0
+                ? <div style={{fontSize:12,color:"rgba(232,245,232,.25)"}}>Todavía no hay series — la primera aparecerá aquí en cuanto guardes.</div>
+                : todaySetGroups.map(ex=>{
+                    const exGroup = MUSCLE_GROUPS.find(m=>m.id===ex.muscleGroup);
+                    return (
+                      <div key={ex.id} style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:"10px 12px",marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,fontWeight:700,marginBottom:4}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:exGroup?.color||"#4ade80",flexShrink:0}}/>
+                          {ex.name}
+                        </div>
+                        <div style={{fontSize:11,color:"rgba(232,245,232,.45)"}}>
+                          {ex.sets.map((s,i)=>`${i+1}ª: ${fmtSetVal(s.weight)}${s.unit||"kg"}×${fmtSetVal(s.reps)}`).join("  ·  ")}
+                        </div>
+                      </div>
+                    );
+                  })
+              }
             </div>
           </>;
         })()}
