@@ -1,11 +1,6 @@
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
-
-const ALLOWED_ORIGINS = [
-  "https://gus-fitness.vercel.app",
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+import { applyCors } from "./_cors.js";
 
 webpush.setVapidDetails(
   process.env.VAPID_EMAIL,
@@ -19,12 +14,7 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  applyCors(req, res, "POST, DELETE, OPTIONS");
   if (req.method === "OPTIONS") return res.status(200).end();
 
   // Requiere sesión válida — el user_id siempre sale del token, nunca del body,

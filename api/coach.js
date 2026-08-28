@@ -1,10 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-
-const ALLOWED_ORIGINS = [
-  "https://gus-fitness.vercel.app",
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+import { applyCors } from "./_cors.js";
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -12,12 +7,7 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  applyCors(req, res, "POST, OPTIONS");
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });

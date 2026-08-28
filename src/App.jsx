@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Component } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library";
 
 const SECTION_COLORS = {
   home:         { primary:"#4ade80", bg:"#091209" },
@@ -217,6 +218,88 @@ function fmtDateEs(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   const MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
   return `${d.getDate()} ${MESES[d.getMonth()]}`;
+}
+
+// ---- Escáner de código de barras: decodificación + Open Food Facts ----
+
+// Formatos de código de barras de producto habituales — se restringe a estos
+// (en vez de aceptar cualquier formato, incluidos QR) para menos falsos positivos.
+const BARCODE_HINTS = new Map();
+BARCODE_HINTS.set(DecodeHintType.POSSIBLE_FORMATS, [
+  BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128,
+]);
+BARCODE_HINTS.set(DecodeHintType.TRY_HARDER, true);
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageEl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Decodifica un código de barras a partir de una foto (cámara o subida) — corre
+// entero en el navegador, la imagen nunca sale del dispositivo para esto.
+async function decodeBarcodeFromFile(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const img = await loadImageEl(dataUrl);
+  const reader = new BrowserMultiFormatReader(BARCODE_HINTS);
+  const result = await reader.decodeFromImageElement(img);
+  return { code: result.getText(), preview: dataUrl };
+}
+
+// El campo "quantity" de Open Food Facts es texto libre y poco fiable ("350 g",
+// "750ml", "6x125g"...). Si no se puede interpretar con confianza, se devuelve
+// null en vez de arriesgar un número inventado — la pantalla pide los gramos a mano.
+function parseOffQuantity(qtyStr) {
+  if (!qtyStr) return null;
+  const m = String(qtyStr).toLowerCase().replace(",", ".").match(/([\d.]+)\s*(kg|g|l|ml|cl)\b/);
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  let unit = m[2];
+  if (unit === "kg") { n *= 1000; unit = "g"; }
+  else if (unit === "l") { n *= 1000; unit = "ml"; }
+  else if (unit === "cl") { n *= 10; unit = "ml"; }
+  if (!n || n <= 0) return null;
+  return { qty: Math.round(n * 10) / 10, unit };
+}
+
+// Busca el producto en Open Food Facts por código de barras. Sin API key: es
+// una base de datos abierta. null si no se encuentra o falla la petición.
+async function lookupOpenFoodFacts(code) {
+  try {
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,brands,quantity,nutriments`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 1 || !data.product) return null;
+    const p = data.product;
+    const n = p.nutriments || {};
+    const parsed = parseOffQuantity(p.quantity);
+    return {
+      name: p.product_name?.trim() || "Producto sin nombre",
+      brand: p.brands?.trim() || "",
+      qty: parsed?.qty ?? null,
+      unit: parsed?.unit ?? "g",
+      kcal100: n["energy-kcal_100g"] ?? 0,
+      prot100: n.proteins_100g ?? 0,
+      carb100: n.carbohydrates_100g ?? 0,
+      fat100: n.fat_100g ?? 0,
+      icon: "🏷️",
+      source: "off",
+    };
+  } catch {
+    return null;
+  }
 }
 
 const EMPTY = { meals: [], drinks: [], weight: "", grasa: "", imc: "", training: "", muscleGroups: [], exercises: [], suppsTaken: [], kcal: 0 };
@@ -725,6 +808,12 @@ function App() {
   const [weightUnit, setWeightUnit] = useState("kg");
   const [goalWeight, setGoalWeight] = useState("");
   const [goalGrasa, setGoalGrasa] = useState("");
+  // Despensa: productos escaneados con seguimiento de stock. Clave = código de barras.
+  // {name,brand,qty,unit,kcal100,prot100,carb100,fat100,icon,remaining}
+  const [despensa, setDespensa] = useState({});
+  // Caché de productos ya buscados en Open Food Facts (o rellenados a mano), por
+  // código de barras — para no repetir la llamada al volver a escanear el mismo.
+  const [productCache, setProductCache] = useState({});
   const [newExerciseInputs, setNewExerciseInputs] = useState({});
   const [setGroupId, setSetGroupId] = useState(null);
   const [setExerciseName, setSetExerciseName] = useState("");
@@ -733,6 +822,22 @@ function App() {
   const [setReps, setSetReps] = useState(8);
   const [setUnit, setSetUnit] = useState("kg");
   const [setSaveFlash, setSetSaveFlash] = useState(false); // confirmación breve al guardar una serie sin salir de la pantalla
+  // Estado del flujo de escaneo de código de barras
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const [scanPreview, setScanPreview] = useState(null);
+  const [scanMatch, setScanMatch] = useState(null); // {code, product}
+  const [scanNotFoundCode, setScanNotFoundCode] = useState(null);
+  const [scanFrac, setScanFrac] = useState("1");
+  const [scanGrams, setScanGrams] = useState("");
+  const [scanDespensaOn, setScanDespensaOn] = useState(false);
+  const [mfName, setMfName] = useState("");
+  const [mfQty, setMfQty] = useState("");
+  const [mfUnit, setMfUnit] = useState("g");
+  const [mfKcal, setMfKcal] = useState("");
+  const [mfProt, setMfProt] = useState("");
+  const [mfCarb, setMfCarb] = useState("");
+  const [mfFat, setMfFat] = useState("");
   const [supplements, setSupplements] = useState([
     { id: "creatina",   label: "Creatina",   icon: "⚡", doses: 1 },
     { id: "magnesio",   label: "Magnesio",   icon: "🌙", doses: 1 },
@@ -767,6 +872,8 @@ function App() {
   const fileRef = useRef(null);
   const chatEnd = useRef(null);
   const saveSetFlashTimer = useRef(null);
+  const scanCameraInputRef = useRef(null);
+  const scanUploadInputRef = useRef(null);
 
   const touchRef = useRef(null);
 
@@ -821,6 +928,8 @@ function App() {
         if (p.weightUnit) setWeightUnit(p.weightUnit);
         if (p.goalWeight) setGoalWeight(p.goalWeight);
         if (p.goalGrasa) setGoalGrasa(p.goalGrasa);
+        if (p.despensa) setDespensa(p.despensa);
+        if (p.productCache) setProductCache(p.productCache);
       }
     } catch {}
     setSettingsLoaded(true);
@@ -831,48 +940,62 @@ function App() {
     const s = newSupps ?? supplements;
     setKcalGoal(k);
     setSupplements(s);
-    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa }));
+    localStorage.setItem("gus_settings", JSON.stringify({ kcalGoal: k, supplements: s, notifConfig: notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa, productCache }));
   };
 
   const saveNotifConfig = (next) => {
     setNotifConfig(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig: next, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa, productCache
     }));
   };
 
   const saveExerciseCatalog = (next) => {
     setExerciseCatalog(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog: next, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa, productCache
     }));
   };
 
   const saveExerciseWeightStep = (next) => {
     setExerciseWeightStep(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep: next, weightUnit, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep: next, weightUnit, goalWeight, goalGrasa, despensa, productCache
     }));
   };
 
   const saveWeightUnit = (next) => {
     setWeightUnit(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit: next, goalWeight, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit: next, goalWeight, goalGrasa, despensa, productCache
     }));
   };
 
   const saveGoalWeight = (next) => {
     setGoalWeight(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight: next, goalGrasa
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight: next, goalGrasa, despensa, productCache
     }));
   };
 
   const saveGoalGrasa = (next) => {
     setGoalGrasa(next);
     localStorage.setItem("gus_settings", JSON.stringify({
-      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa: next
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa: next, despensa, productCache
+    }));
+  };
+
+  const saveDespensa = (next) => {
+    setDespensa(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa: next, productCache
+    }));
+  };
+
+  const saveProductCache = (next) => {
+    setProductCache(next);
+    localStorage.setItem("gus_settings", JSON.stringify({
+      kcalGoal, supplements, notifConfig, userProfile, macroGoals, exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa, productCache: next
     }));
   };
 
@@ -1393,6 +1516,114 @@ function App() {
     });
   };
 
+  // ---- Escáner de código de barras ----
+
+  const openScanBarcode = () => {
+    setScanBusy(false); setScanError(null); setScanPreview(null);
+    setScanMatch(null); setScanNotFoundCode(null);
+    setScreen("scanBarcode");
+  };
+
+  // Tras decodificar un código: primero la caché local (ya buscado antes, o
+  // rellenado a mano), luego Open Food Facts en vivo si hace falta.
+  const resolveScannedCode = async (code) => {
+    const cached = productCache[code];
+    if (cached) { finishScanMatch(code, cached); return; }
+    setScanBusy(true);
+    const off = await lookupOpenFoodFacts(code);
+    setScanBusy(false);
+    if (off) {
+      const next = { ...productCache, [code]: off };
+      saveProductCache(next);
+      finishScanMatch(code, off);
+    } else {
+      setScanMatch(null);
+      setScanNotFoundCode(code);
+      setMfName(""); setMfQty(""); setMfUnit("g"); setMfKcal(""); setMfProt(""); setMfCarb(""); setMfFat("");
+      setScreen("scanProduct");
+    }
+  };
+
+  const finishScanMatch = (code, product) => {
+    setScanMatch({ code, product });
+    setScanNotFoundCode(null);
+    setScanFrac("1"); setScanGrams("");
+    setScanDespensaOn(despensa[code] ? true : !!product.defaultDespensa);
+    setScreen("scanProduct");
+  };
+
+  const onScanFileChange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = ""; // permite volver a elegir el mismo archivo más tarde
+    if (!file) return;
+    setScanBusy(true); setScanError(null);
+    try {
+      const { code, preview } = await decodeBarcodeFromFile(file);
+      setScanPreview(preview);
+      setScanBusy(false);
+      resolveScannedCode(code);
+    } catch (err) {
+      setScanBusy(false);
+      setScanPreview(null);
+      setScanError("No se detectó ningún código — prueba con más luz, más cerca, o menos ángulo.");
+    }
+  };
+
+  const saveManualProduct = () => {
+    const name = mfName.trim();
+    if (!name) return;
+    const product = {
+      name,
+      brand: "Añadido a mano",
+      qty: parseFloat(mfQty) || null,
+      unit: mfUnit.trim() || "g",
+      kcal100: parseFloat(mfKcal) || 0,
+      prot100: parseFloat(mfProt) || 0,
+      carb100: parseFloat(mfCarb) || 0,
+      fat100: parseFloat(mfFat) || 0,
+      icon: "🏷️",
+      source: "manual",
+    };
+    saveProductCache({ ...productCache, [scanNotFoundCode]: product });
+    finishScanMatch(scanNotFoundCode, product);
+  };
+
+  const scanFracGrams = () => {
+    if (!scanMatch) return 0;
+    const product = scanMatch.product;
+    if (scanFrac === "custom") return parseFloat(scanGrams) || 0;
+    if (product.qty == null) return 0;
+    return product.qty * parseFloat(scanFrac);
+  };
+
+  const saveScannedMeal = () => {
+    if (!scanMatch) return;
+    const { code, product } = scanMatch;
+    const grams = scanFracGrams();
+    if (!grams) return;
+    const round1 = (n) => Math.round(n * 10) / 10;
+    const meal = {
+      id: Date.now(),
+      slot: timeSlot(),
+      time: nowTime(),
+      desc: `${product.name} (${round1(grams)}${product.unit})`,
+      kcal: Math.round(product.kcal100 * grams / 100),
+      prot: round1(product.prot100 * grams / 100),
+      carb: round1(product.carb100 * grams / 100),
+      fat: round1(product.fat100 * grams / 100),
+    };
+    setT({ meals: [...today.meals, meal] });
+
+    if (scanDespensaOn) {
+      const prevRemaining = despensa[code]?.remaining ?? (product.qty ?? grams);
+      const nextRemaining = Math.max(0, round1(prevRemaining - grams));
+      saveDespensa({ ...despensa, [code]: { ...product, remaining: nextRemaining } });
+    }
+
+    setScanMatch(null); setScanNotFoundCode(null); setScanPreview(null);
+    setScreen("home");
+  };
+
   const addDrink = () => {
     if (!drinkAmt.trim()) return;
     setT({ drinks: [...today.drinks, { id: Date.now(), type: drinkId, amount: drinkAmt, unit: drinkUnit, time: nowTime() }] });
@@ -1716,7 +1947,7 @@ function App() {
     localStorage.setItem("gus_settings", JSON.stringify({
       kcalGoal: macros.kcal, supplements, notifConfig, userProfile: profile,
       macroGoals: { prot: macros.prot, carb: macros.carb, fat: macros.fat },
-      exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa
+      exerciseCatalog, exerciseWeightStep, weightUnit, goalWeight, goalGrasa, despensa, productCache
     }));
   };
 
@@ -1883,7 +2114,10 @@ function App() {
           <div style={g.card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div style={g.sec}>🍽️ Comidas de hoy</div>
-              <button style={g.addBtn} onClick={()=>{setMealSlot(timeSlot());setMealDesc("");setScreen("addMeal");}}>+ Añadir</button>
+              <div style={{display:"flex",gap:6}}>
+                <button style={g.addBtn} onClick={openScanBarcode}>📷 Escanear</button>
+                <button style={g.addBtn} onClick={()=>{setMealSlot(timeSlot());setMealDesc("");setScreen("addMeal");}}>+ Añadir</button>
+              </div>
             </div>
             {today.meals.length===0?<p style={{color:"rgba(232,245,232,.22)",fontSize:12}}>Sin comidas registradas aún</p>
               :today.meals.map(m=>{const sl=MEALS.find(x=>x.id===m.slot);return(
@@ -1896,6 +2130,33 @@ function App() {
                 </div>
                 <button style={g.rm} onClick={()=>setT({meals:today.meals.filter(x=>x.id!==m.id)})}>×</button>
               </div>);})}
+          </div>
+
+          <div style={g.card}>
+            <div style={g.sec}>📦 Despensa</div>
+            {Object.keys(despensa).length===0
+              ? <p style={{color:"rgba(232,245,232,.22)",fontSize:12}}>Nada trackeado todavía — escanea un producto y activa "trackear en despensa"</p>
+              : Object.entries(despensa).map(([code,item])=>{
+                  const pct = item.qty ? Math.max(0,Math.min(100,Math.round(item.remaining/item.qty*100))) : 0;
+                  const low = pct < 20;
+                  return (
+                    <div key={code} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
+                      <div style={{width:32,height:32,borderRadius:9,background:"rgba(255,255,255,.05)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{item.icon||"🏷️"}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11.5,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",gap:6}}>
+                          {item.name}
+                          {low&&<span style={{fontSize:8.5,fontWeight:800,color:"#fb923c",background:"rgba(251,146,60,.14)",border:"1px solid rgba(251,146,60,.3)",padding:"1px 6px",borderRadius:99}}>queda poco</span>}
+                        </div>
+                        <div style={{background:"rgba(255,255,255,.06)",borderRadius:99,height:6}}>
+                          <div style={{height:"100%",borderRadius:99,background:low?"#fb923c":"#4ade80",width:`${pct}%`,transition:"width .5s ease"}}/>
+                        </div>
+                        <div style={{fontSize:9.5,color:"rgba(232,245,232,.35)",marginTop:3}}>{item.remaining}{item.unit} de {item.qty}{item.unit} ({pct}%)</div>
+                      </div>
+                      <button style={g.rm} onClick={()=>{const next={...despensa};delete next[code];saveDespensa(next);}}>×</button>
+                    </div>
+                  );
+                })
+            }
           </div>
 
           <div style={g.card}>
@@ -2219,6 +2480,122 @@ function App() {
             <button style={g.btnP} onClick={addMeal}>Guardar comida ✓</button>
           </div>
         </>}
+
+        {screen==="scanBarcode"&&<>
+          <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
+          <div style={{marginTop:6}}>
+            <div style={{fontSize:18,fontWeight:900,marginBottom:4}}>📷 Escanear producto</div>
+            <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:18}}>Código de barras del envase (EAN-13, EAN-8, UPC, Code128)</div>
+
+            <div style={{
+              height:150,borderRadius:16,
+              border:`1.5px dashed ${scanError?"rgba(248,113,113,.4)":"rgba(74,222,128,.3)"}`,
+              background:scanError?"rgba(248,113,113,.06)":"rgba(74,222,128,.04)",
+              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,
+              marginBottom:16,position:"relative",overflow:"hidden",
+            }}>
+              {scanPreview&&<img src={scanPreview} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"contain",background:"#000"}}/>}
+              {!scanPreview&&scanBusy&&<><div style={{fontSize:28}}>⏳</div><div style={{fontSize:11.5,color:"#4ade80"}}>Decodificando…</div></>}
+              {!scanPreview&&!scanBusy&&scanError&&<><div style={{fontSize:28}}>⚠️</div><div style={{fontSize:11.5,color:"#f87171",textAlign:"center",padding:"0 20px"}}>{scanError}</div></>}
+              {!scanPreview&&!scanBusy&&!scanError&&<><div style={{fontSize:28}}>📷</div><div style={{fontSize:11.5,color:"rgba(232,245,232,.35)"}}>Sin foto todavía</div></>}
+            </div>
+
+            <button style={g.btnP} onClick={()=>scanCameraInputRef.current?.click()}>📷 Tomar foto del código</button>
+            <button style={g.btnS} onClick={()=>scanUploadInputRef.current?.click()}>🖼️ Subir imagen</button>
+            <input ref={scanCameraInputRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={onScanFileChange}/>
+            <input ref={scanUploadInputRef} type="file" accept="image/*" style={{display:"none"}} onChange={onScanFileChange}/>
+          </div>
+        </>}
+
+        {screen==="scanProduct"&&(()=>{
+          if (scanNotFoundCode) {
+            return <>
+              <button style={g.back} onClick={()=>{setScanNotFoundCode(null);setScreen("scanBarcode");}}>← Volver a escanear</button>
+              <div style={{marginTop:6}}>
+                <div style={{fontSize:18,fontWeight:900,marginBottom:4}}>Producto no encontrado</div>
+                <div style={{fontSize:12,color:"rgba(232,245,232,.4)",marginBottom:18}}>Código {scanNotFoundCode} — no está en Open Food Facts. Rellénalo y se recuerda para la próxima vez que lo escanees.</div>
+                <label style={g.lbl}>Nombre</label>
+                <input style={g.inp} placeholder="ej: Copos de avena" value={mfName} onChange={e=>setMfName(e.target.value)}/>
+                <div style={{display:"flex",gap:8}}>
+                  <div style={{flex:1}}><label style={g.lbl}>Cantidad</label><input style={g.inp} type="number" placeholder="500" value={mfQty} onChange={e=>setMfQty(e.target.value)}/></div>
+                  <div style={{flex:1}}><label style={g.lbl}>Unidad</label><input style={g.inp} placeholder="g" value={mfUnit} onChange={e=>setMfUnit(e.target.value)}/></div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <div style={{flex:1}}><label style={g.lbl}>Kcal/100{mfUnit||"g"}</label><input style={g.inp} type="number" placeholder="380" value={mfKcal} onChange={e=>setMfKcal(e.target.value)}/></div>
+                  <div style={{flex:1}}><label style={g.lbl}>Prot/100{mfUnit||"g"}</label><input style={g.inp} type="number" placeholder="13" value={mfProt} onChange={e=>setMfProt(e.target.value)}/></div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <div style={{flex:1}}><label style={g.lbl}>Carb/100{mfUnit||"g"}</label><input style={g.inp} type="number" placeholder="60" value={mfCarb} onChange={e=>setMfCarb(e.target.value)}/></div>
+                  <div style={{flex:1}}><label style={g.lbl}>Grasa/100{mfUnit||"g"}</label><input style={g.inp} type="number" placeholder="7" value={mfFat} onChange={e=>setMfFat(e.target.value)}/></div>
+                </div>
+                <button style={{...g.btnP,marginTop:4}} onClick={saveManualProduct}>Guardar producto y continuar →</button>
+              </div>
+            </>;
+          }
+
+          if (!scanMatch) return null; // no debería pasar; evita un crash si se llega aquí sin datos
+
+          const product = scanMatch.product;
+          const grams = scanFracGrams();
+          const round1 = (n) => Math.round(n*10)/10;
+          const kcal = Math.round(product.kcal100*grams/100);
+          const prot = round1(product.prot100*grams/100);
+          const carb = round1(product.carb100*grams/100);
+          const fat  = round1(product.fat100*grams/100);
+          const hasQty = product.qty != null;
+
+          return <>
+            <button style={g.back} onClick={()=>setScreen("scanBarcode")}>← Volver a escanear</button>
+            <div style={{marginTop:6}}>
+              <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:14}}>
+                <div style={{width:46,height:46,borderRadius:12,background:"rgba(74,222,128,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{product.icon||"🏷️"}</div>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800}}>{product.name}</div>
+                  <div style={{fontSize:11,color:"rgba(232,245,232,.4)"}}>{product.brand}{hasQty?` · ${product.qty}${product.unit}`:""}</div>
+                </div>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:18}}>
+                <div style={g.sbox}><div style={g.sv}>{product.kcal100}</div><div style={g.sl}>kcal/100</div></div>
+                <div style={g.sbox}><div style={g.sv}>{product.prot100}</div><div style={g.sl}>prot/100</div></div>
+                <div style={g.sbox}><div style={g.sv}>{product.carb100}</div><div style={g.sl}>carb/100</div></div>
+                <div style={g.sbox}><div style={g.sv}>{product.fat100}</div><div style={g.sl}>grasa/100</div></div>
+              </div>
+
+              <label style={g.lbl}>¿Cuánto gastas?</label>
+              <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:12}}>
+                {hasQty&&["1","0.5","0.25"].map(f=>{
+                  const lbl = f==="1"?"Envase completo":f==="0.5"?"Mitad":"Cuarto";
+                  return <button key={f} style={g.chip(scanFrac===f)} onClick={()=>setScanFrac(f)}>{lbl}</button>;
+                })}
+                <button style={g.chip(scanFrac==="custom")} onClick={()=>setScanFrac("custom")}>Gramos exactos</button>
+              </div>
+              {(scanFrac==="custom"||!hasQty)&&(
+                <input style={g.inp} type="number" placeholder={`Gramos (${product.unit})`} value={scanGrams} onChange={e=>setScanGrams(e.target.value)}/>
+              )}
+              {!hasQty&&<div style={{fontSize:11,color:"rgba(251,191,36,.7)",marginTop:-8,marginBottom:14}}>No pudimos leer el tamaño del envase — indica los gramos a mano.</div>}
+
+              <div style={{background:"rgba(74,222,128,.05)",border:"1px solid rgba(74,222,128,.18)",borderRadius:12,padding:"12px 14px",marginBottom:16,fontSize:12,color:"rgba(232,245,232,.65)"}}>
+                Vas a registrar <b style={{color:"#4ade80"}}>{round1(grams)}{product.unit}</b> → <b style={{color:"#4ade80"}}>{kcal}kcal</b> · P {prot}g · C {carb}g · G {fat}g
+              </div>
+
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:"11px 14px",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700}}>📦 Trackear en despensa</div>
+                  <div style={{fontSize:10,color:"rgba(232,245,232,.35)",marginTop:2}}>Resta del stock guardado para este producto</div>
+                </div>
+                <button onClick={()=>setScanDespensaOn(!scanDespensaOn)}
+                  style={{width:44,height:24,borderRadius:99,border:"none",cursor:"pointer",padding:2,flexShrink:0,
+                    background:scanDespensaOn?"linear-gradient(135deg,#4ade80,#22c55e)":"rgba(255,255,255,.12)",
+                    display:"flex",justifyContent:scanDespensaOn?"flex-end":"flex-start",transition:"all .2s"}}>
+                  <span style={{width:20,height:20,borderRadius:"50%",background:"#fff",display:"block"}}/>
+                </button>
+              </div>
+
+              <button style={g.btnP} onClick={saveScannedMeal} disabled={!grams}>Guardar ✓</button>
+            </div>
+          </>;
+        })()}
 
         {screen==="addDrink"&&<>
           <button style={g.back} onClick={()=>setScreen("home")}>← Volver</button>
